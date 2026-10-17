@@ -183,6 +183,15 @@ function fontStr(style, size) {
   return `${style.weight} ${size}px "${style.font}", "Noto Color Emoji", sans-serif`;
 }
 
+// Letter spacing is stored as a fraction of the font size (e.g. -0.04 = 4% tighter).
+// The canvas adds it after every glyph, including the last, so widths drop one step.
+const tracking = (style, size) => (style.letterSpacing || 0) * size;
+function setFont(ctx, style, size) {
+  ctx.font = fontStr(style, size);
+  if ("letterSpacing" in ctx) ctx.letterSpacing = `${tracking(style, size)}px`;
+}
+const textW = (ctx, text, style, size) => ctx.measureText(text).width - ("letterSpacing" in ctx && text ? tracking(style, size) : 0);
+
 export function roundRect(ctx, x, y, w, h, r) {
   r = Math.min(r, h / 2, w / 2);
   ctx.beginPath();
@@ -198,12 +207,12 @@ const layoutCache = new Map();
 export function clearLayoutCache() { layoutCache.clear(); }
 
 function layoutGroup(ctx, g, style, W) {
-  const key = [style.font, style.weight, style.size, style.uppercase, style.stripPunct, style.maxWidth,
+  const key = [style.font, style.weight, style.size, style.letterSpacing || 0, style.uppercase, style.stripPunct, style.maxWidth,
     style.lineHeight, style.highlight, style.activeScale, W, ...g.words.map((w) => w.text)].join("|");
   const hit = layoutCache.get(key);
   if (hit) return hit;
-  ctx.font = fontStr(style, style.size);
-  let space = Math.max(ctx.measureText(" ").width, style.size * 0.26);
+  setFont(ctx, style, style.size);
+  let space = Math.max(ctx.measureText(" ").width - tracking(style, style.size), style.size * 0.26);
   if (style.highlight === "box") space = Math.max(space, style.size * 0.44);
   // Leave room for the active word to pop without overlapping its neighbours.
   const pop = Math.max(0, (style.activeScale || 1) - 1) / 2;
@@ -213,7 +222,7 @@ function layoutGroup(ctx, g, style, W) {
   let line = { items: [], w: 0 };
   for (let i = 0; i < g.words.length; i++) {
     const text = displayText(g.words[i], style);
-    const it = { i, text, w: ctx.measureText(text).width };
+    const it = { i, text, w: textW(ctx, text, style, style.size) };
     const prev = line.items[line.items.length - 1];
     if (prev && line.w + gap(prev, it) + it.w > maxW) { lines.push(line); line = { items: [], w: 0 }; }
     const p = line.items[line.items.length - 1];
@@ -250,7 +259,7 @@ export function drawCaptions(ctx, L, st, scale) {
   if (style.enter === "pop") { const s = 0.72 + 0.28 * easeOutBack(p); ctx.scale(s, s); }
   else if (style.enter === "fade") ctx.globalAlpha = easeOutCubic(p);
   else if (style.enter === "slide") { ctx.globalAlpha = easeOutCubic(p); ctx.translate(0, 40 * (1 - easeOutCubic(p))); }
-  ctx.font = fontStr(style, style.size);
+  setFont(ctx, style, style.size);
   ctx.textBaseline = "middle";
   ctx.textAlign = "left";
   ctx.lineJoin = "round";
@@ -307,6 +316,7 @@ export function drawCaptions(ctx, L, st, scale) {
     const e = g.words[st.em].emoji;
     const size = style.size * 1.35;
     ctx.font = `${size}px "Noto Color Emoji"`;
+    if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
     ctx.textAlign = "center";
     const top = single ? -style.size * 0.5 : -lay.height / 2;
     const s = 0.3 + 0.7 * easeOutBack(st.ee);
@@ -343,7 +353,7 @@ export function drawText(ctx, L, c, pin, pout, scale, v) {
   let text = s.uppercase ? c.text.toUpperCase() : c.text;
   if (c.anim === "typewriter" && pin < 1) text = text.slice(0, Math.ceil(text.length * pin));
   ctx.save();
-  ctx.font = fontStr(s, s.size);
+  setFont(ctx, s, s.size);
   ctx.textBaseline = "middle";
   ctx.textAlign = "center";
   ctx.lineJoin = "round";
@@ -351,7 +361,8 @@ export function drawText(ctx, L, c, pin, pout, scale, v) {
   const lines = wrapText(ctx, full, W * (s.maxWidth || 0.86));
   const shown = c.anim === "typewriter" ? wrapText(ctx, text, W * (s.maxWidth || 0.86)) : lines;
   const lh = s.size * (s.lineHeight || 1.25);
-  const widths = lines.map((l) => ctx.measureText(l).width);
+  const widths = lines.map((l) => textW(ctx, l, s, s.size));
+  const tx = ("letterSpacing" in ctx ? tracking(s, s.size) : 0) / 2; // re-centre: the trailing step is not ink
   const bw = Math.max(...widths, 10), bh = lines.length * lh;
   const cx = v.x * W, cy = v.y * H;
   ctx.translate(cx, cy);
@@ -367,7 +378,7 @@ export function drawText(ctx, L, c, pin, pout, scale, v) {
   ctx.scale(sc, sc);
   shown.forEach((ln, i) => {
     const y = i * lh - (lines.length - 1) * lh / 2;
-    const w = ctx.measureText(ln).width;
+    const w = textW(ctx, ln, s, s.size);
     if (s.bg) {
       ctx.fillStyle = s.bg;
       const pad = s.size * 0.32;
@@ -378,12 +389,12 @@ export function drawText(ctx, L, c, pin, pout, scale, v) {
       ctx.shadowColor = s.shadowColor || "rgba(0,0,0,0.6)";
       ctx.shadowBlur = (s.shadow || 0) * scale;
       ctx.shadowOffsetY = (s.shadow || 0) * 0.2 * scale;
-      if (s.stroke > 0) { ctx.strokeStyle = s.strokeColor; ctx.lineWidth = s.stroke * 2; ctx.strokeText(ln, 0, y); }
-      else { ctx.fillStyle = s.color; ctx.fillText(ln, 0, y); }
+      if (s.stroke > 0) { ctx.strokeStyle = s.strokeColor; ctx.lineWidth = s.stroke * 2; ctx.strokeText(ln, tx, y); }
+      else { ctx.fillStyle = s.color; ctx.fillText(ln, tx, y); }
       ctx.shadowColor = "transparent";
     }
     ctx.fillStyle = s.color;
-    ctx.fillText(ln, 0, y);
+    ctx.fillText(ln, tx, y);
   });
   ctx.restore();
   const pad = s.bg ? s.size * 0.32 : 10;

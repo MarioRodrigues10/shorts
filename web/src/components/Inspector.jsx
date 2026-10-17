@@ -396,6 +396,7 @@ function TextClip({ c }) {
           <Select label="Case" value={s.uppercase ? "up" : "as"} onChange={(v) => set("style.uppercase", v === "up")} options={[["as", "As typed"], ["up", "UPPERCASE"]]} />
         </div>
         <Slider label="Size" value={s.size} min={16} max={240} step={1} onChange={(v) => set("style.size", v)} />
+        <Slider label="Letter spacing" value={s.letterSpacing || 0} min={-0.1} max={0.2} step={0.005} resetTo={0} format={(v) => (v > 0 ? "+" : "") + Math.round(v * 100) + "%"} onChange={(v) => set("style.letterSpacing", v)} />
       </Section>
       <Section title="Colors">
         <ColorField label="Text" value={s.color} onChange={(v) => set("style.color", v)} />
