@@ -1,0 +1,70 @@
+# ---- dependencies & build output (recreated by scripts/setup.sh)
+web/node_modules/
+static/app/
+static/fonts/
+.venv/
+.venv-*/
+__pycache__/
+*.pyc
+models/
+
+# ---- never commit media or user data ------------------------------------
+# Projects, transcripts, caches and exports live OUTSIDE the repo
+# (~/.local/share/shorts-studio, ~/.config/shorts-studio, ~/Videos/...).
+# These patterns are a second line of defence; .githooks/pre-commit is the third.
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.m4v
+*.avi
+*.mxf
+*.mts
+*.wav
+*.mp3
+*.m4a
+*.aac
+*.ogg
+*.opus
+*.flac
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.heic
+*.srt
+*.vtt
+*.tflite
+*.onnx
+*.bin
+*.safetensors
+projects*/
+render-cache/
+thumbs/
+sfx/
+words.json
+meta.json
+peaks.json
+transcript*.json
+faces_*.json
+default-style.json
+
+# the README demo is synthetic (scripts/demo/record.sh) and is the only media allowed in
+!docs/media/demo.mp4
+!docs/media/demo.webp
+!docs/media/editor-light.webp
+!docs/media/editor-dark.webp
+
+# ---- secrets & local settings
+.env
+.env.*
+*.pem
+*.key
+.claude/
+
+# ---- editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

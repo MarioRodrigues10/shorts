@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Refuses commits that would leak media, user data, secrets or local paths (see scripts/check-no-data.sh).
+# Enabled by the setup scripts (git config core.hooksPath .githooks).
+exec "$(git rev-parse --show-toplevel)/scripts/check-no-data.sh" --staged

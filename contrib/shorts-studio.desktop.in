@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Shorts
+Comment=Edit, caption and export short-form videos
+Exec=@ROOT@/shorts %f
+MimeType=video/mp4;video/quicktime;video/x-matroska;
+Icon=@ROOT@/docs/mascot/mark.svg
+Terminal=false
+Categories=AudioVideo;Video;

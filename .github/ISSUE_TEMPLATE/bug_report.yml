@@ -1,0 +1,24 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead. Screenshots help.
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      placeholder: "e.g. Ubuntu 24.04 / macOS 15 / Windows 11, Firefox 140"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server log
+      description: "Linux: `journalctl --user -u shorts-studio -n 100`. Otherwise run `shorts serve` and paste the output. Please remove anything private."
+      render: text

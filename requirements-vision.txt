@@ -1,0 +1,4 @@
+# Auto-reframe + background replacement — installed into .venv-vision by scripts/setup.sh
+mediapipe>=0.10.20
+opencv-python-headless>=4.9
+numpy>=1.26

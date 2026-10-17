@@ -1,0 +1,3 @@
+# Transcription (CPU, int8) — installed into .venv by scripts/setup.sh
+faster-whisper>=1.1
+numpy>=1.26

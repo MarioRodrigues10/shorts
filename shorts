@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""shorts — command line entry point for Shorts.
+
+  shorts                 open the studio (library)
+  shorts FILE            open FILE in the editor (transcribes on first open)
+  shorts convert FILE…   platform-ready MP4 without editing (H.264 1080x1920, -14 LUFS)
+  shorts serve           run the server in the foreground
+"""
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import urllib.request
+import webbrowser
+from pathlib import Path
+
+APP = Path(__file__).resolve().parent
+PORT = int(os.environ.get("SHORTS_PORT", 7377))
+BASE = f"http://127.0.0.1:{PORT}"
+
+
+def call(path, body=None):
+    req = urllib.request.Request(BASE + path, method="POST" if body is not None else "GET",
+                                 data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read())
+
+
+def alive():
+    try:
+        return call("/api/ping").get("ok")
+    except Exception:
+        return False
+
+
+def ensure_server():
+    if alive():
+        return
+    # Linux with the user service installed; everywhere else start it in the background
+    started = shutil.which("systemctl") is not None and subprocess.run(
+        ["systemctl", "--user", "start", "shorts-studio"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+    if not started:
+        detach = ({"creationflags": 0x00000008 | 0x00000200 | 0x00004000}  # DETACHED, NEW_GROUP, BELOW_NORMAL
+                  if os.name == "nt" else {"start_new_session": True})
+        subprocess.Popen([sys.executable, str(APP / "server.py")], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **detach)
+    for _ in range(100):
+        if alive():
+            return
+        time.sleep(0.1)
+    sys.exit("shorts: server did not start (try: shorts serve)")
+
+
+def browse(url):
+    webbrowser.open(url)
+
+
+def wait_job(jid, label):
+    while True:
+        j = call(f"/api/jobs/{jid}")
+        pct = int(j["progress"] * 100)
+        print(f"\r{label}: {j.get('message') or ''} {pct}%   ", end="", flush=True)
+        if j["status"] == "done":
+            print(f"\r{label}: done -> {j['result']['path']}                ")
+            return
+        if j["status"] == "error":
+            print()
+            sys.exit(j["error"])
+        time.sleep(0.5)
+
+
+def main(argv):
+    if argv[:1] == ["serve"]:
+        sys.exit(subprocess.call([sys.executable, str(APP / "server.py")]))
+    if argv[:1] in (["-h"], ["--help"], ["help"]):
+        print(__doc__.strip())
+        return
+    ensure_server()
+    if not argv:
+        browse(BASE + "/")
+    elif argv[0] == "convert":
+        for f in argv[1:]:
+            jid = call("/api/convert", {"path": str(Path(f).resolve())})["job"]
+            wait_job(jid, Path(f).name)
+    else:
+        pid = call("/api/open", {"path": str(Path(argv[0]).resolve())})["id"]
+        browse(f"{BASE}/#/p/{pid}")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

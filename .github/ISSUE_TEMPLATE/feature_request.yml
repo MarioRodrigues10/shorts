@@ -1,0 +1,11 @@
+name: Feature request
+description: Something CapCut (or another editor) does that you miss here
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like to do?
+      description: Describe the result you want in your video, and how you'd expect to do it.
+    validations:
+      required: true

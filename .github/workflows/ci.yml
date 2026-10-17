@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    name: Tests, build, no-data guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Unit tests
+        working-directory: web
+        run: bun install --frozen-lockfile && bun test
+      - name: Build UI
+        working-directory: web
+        run: bun run build
+      - name: Python compiles
+        run: python3 -m py_compile server.py transcribe.py vision.py shorts docs/mascot/build.py scripts/demo/*.py
+      - name: No media, user data or local paths in the repo
+        run: scripts/check-no-data.sh
+
+  setup:
+    name: Setup on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: astral-sh/setup-uv@v5
+      - name: FFmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -yq ffmpeg
+      - name: FFmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - name: FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+      - name: Setup (Linux / macOS)
+        if: runner.os != 'Windows'
+        run: scripts/setup.sh --no-vision --no-service
+      - name: Setup (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + $env:Path
+          ./scripts/setup.ps1 -NoVision
+      - name: Smoke test (server + export pipeline)
+        shell: bash
+        env:
+          SHORTS_PORT: "7399"
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then PY=.venv/Scripts/python.exe; export PATH="/c/ProgramData/chocolatey/bin:$PATH"; else PY=.venv/bin/python; fi
+          "$PY" server.py > server.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf "http://127.0.0.1:$SHORTS_PORT/api/ping" && break; sleep 1; done
+          curl -sf -o /dev/null "http://127.0.0.1:$SHORTS_PORT/" || { cat server.log; exit 1; }
+          ffmpeg -v error -f lavfi -i testsrc2=s=1280x720:d=3:r=30 -f lavfi -i sine=d=3 -shortest -c:v libx264 -c:a aac clip.mp4
+          "$PY" shorts convert clip.mp4 || { cat server.log; exit 1; }
