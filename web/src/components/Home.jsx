@@ -3,7 +3,7 @@ import { Plus, UploadSimple, DotsThree, FilmSlate, Trash, PencilSimple, CheckCir
 import { useTheme } from "../lib/theme.js";
 import { api, fmt, fmtSize } from "../core/util.js";
 import * as Media from "../core/media.js";
-import { Button, IconBtn, Menu, Empty } from "./ui/index.jsx";
+import { Button, IconBtn, Menu, Empty, Dialog } from "./ui/index.jsx";
 import { toast } from "sonner";
 import { mark, sleep } from "../lib/mascot.js";
 
@@ -24,11 +24,12 @@ export default function Home() {
   useEffect(() => { document.title = "Shorts"; load(); }, []);
 
   const creating = useRef(false);
-  const create = async (path) => {
+  const [naming, setNaming] = useState(false);
+  const create = async (path, name) => {
     if (creating.current) return;  // ignore double clicks
     creating.current = true;
     setBusy(path ? "Opening…" : "Creating…");
-    try { const { id } = await api("/api/projects", path ? { from: path } : { name: "Untitled" }); go(id); }
+    try { const { id } = await api("/api/projects", path ? { from: path } : { name: name || "Untitled" }); go(id); }
     catch (e) { toast.error("Could not create project: " + e.message); setBusy(""); creating.current = false; }
   };
 
@@ -63,7 +64,7 @@ export default function Home() {
         {busy && <span className="mr-2 text-xs text-muted">{busy}</span>}
         <IconBtn icon={theme === "dark" ? Sun : Moon} label={theme === "dark" ? "Light mode" : "Dark mode"} onClick={toggleTheme} side="bottom" />
         <Button onClick={() => fileRef.current.click()}><UploadSimple size={15} />Import</Button>
-        <Button variant="primary" onClick={() => create()}><Plus size={15} />New project</Button>
+        <Button variant="primary" onClick={() => setNaming(true)}><Plus size={15} />New project</Button>
         <input ref={fileRef} type="file" accept="video/*,image/*" multiple hidden onChange={(e) => uploadAndCreate([...e.target.files])} />
       </header>
 
@@ -97,6 +98,7 @@ export default function Home() {
         </div>
       </main>
 
+      <NewProjectDialog open={naming} onOpenChange={setNaming} onCreate={(name) => { setNaming(false); create(null, name); }} />
       {drag && (
         <div className="pointer-events-none fixed inset-3 z-50 flex items-center justify-center rounded-lg border-2 border-dashed border-accent bg-surface/80">
           <div className="text-sm font-medium">Drop to start a project</div>
@@ -142,5 +144,23 @@ function ProjectCard({ p, reload }) {
         <div className="text-[11px] text-subtle">{fmt(p.duration).replace(/\.\d$/, "")} · {new Date(p.updated * 1000).toLocaleDateString()}</div>
       </div>
     </div>
+  );
+}
+
+function NewProjectDialog({ open, onOpenChange, onCreate }) {
+  const [name, setName] = useState("");
+  useEffect(() => { if (open) setName(""); }, [open]);
+  const submit = (e) => { e.preventDefault(); onCreate(name.trim() || "Untitled"); };
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange} title="New project" description="The title is also the exported file's name." className="w-[420px]">
+      <form onSubmit={submit} className="mt-4">
+        <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Why I moved to SF" maxLength={120}
+          className="h-10 w-full rounded-lg border border-line-strong bg-surface-2 px-3 text-sm outline-none focus:border-accent" />
+        <div className="mt-4 flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button type="submit" variant="primary">Create</Button>
+        </div>
+      </form>
+    </Dialog>
   );
 }

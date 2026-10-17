@@ -112,6 +112,7 @@ DEFAULT_CONFIG = {
     "x264_preset": "medium",
     "crf": 16,
     "vaapi_qp": 14,
+    "ffmpeg_stall_seconds": 180,  # stop an ffmpeg run that makes no progress for this long
 }
 
 
@@ -181,27 +182,52 @@ def run_job(job, fn, *args):
 
 
 def run_ffmpeg(cmd, job=None, total=None, start=0.0, span=1.0, key="progress"):
-    """Run ffmpeg at low priority, reporting progress in [start, start+span] on job[key]."""
+    """Run ffmpeg at low priority, reporting progress in [start, start+span] on job[key].
+
+    A watchdog stops runs that make no sense any more: no progress for `ffmpeg_stall_seconds`
+    (default 3 min), or, when the media length is known, longer than 30x real time (min 10 min).
+    A stopped run raises, so the export fails with a message and the next queued one starts."""
     cmd = low([cmd[0], "-hide_banner", "-nostats", "-progress", "pipe:1"] + cmd[1:])
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **LOW_FLAGS)
     err_lines = []
+    began = last = time.time()
+    seen = {}
+    stall = float(CONFIG.get("ffmpeg_stall_seconds", 180))
+    limit = max(600.0, 30 * total) if total else None
+    stopped = []
 
     def drain():
         for line in proc.stderr:
             err_lines.append(line)
             if len(err_lines) > 400:
                 del err_lines[:200]
-    t = threading.Thread(target=drain, daemon=True)
-    t.start()
+
+    def watchdog():
+        while proc.poll() is None:
+            time.sleep(5)
+            now = time.time()
+            why = (f"no progress for {int(now - last)} s" if now - last > stall else
+                   f"still running after {int(now - began)} s for {total:.0f} s of media" if limit and now - began > limit else None)
+            if why and proc.poll() is None:
+                stopped.append(why)
+                print("ffmpeg watchdog: stopping (" + why + "):", " ".join(cmd[:12]), flush=True)
+                proc.kill()
+                return
+    threading.Thread(target=drain, daemon=True).start()
+    threading.Thread(target=watchdog, daemon=True).start()
     for line in proc.stdout:
-        if job is not None and total and line.startswith("out_time_us="):
+        k, _, v = line.strip().partition("=")
+        if k in ("out_time_us", "frame", "total_size") and seen.get(k) != v:
+            seen[k] = v
+            last = time.time()  # any advance counts as progress
+        if job is not None and total and k == "out_time_us":
             try:
-                us = int(line.split("=", 1)[1])
-                job[key] = start + span * max(0.0, min(1.0, us / 1e6 / total))
+                job[key] = start + span * max(0.0, min(1.0, int(v) / 1e6 / total))
             except ValueError:
                 pass
     proc.wait()
-    t.join()
+    if stopped:
+        raise RuntimeError(f"ffmpeg was stopped because it looked stuck ({stopped[0]}). Try exporting again.")
     if proc.returncode != 0:
         raise RuntimeError("ffmpeg failed:\n" + "".join(err_lines[-25:]))
     return "".join(err_lines)
