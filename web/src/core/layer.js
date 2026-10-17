@@ -203,19 +203,23 @@ export function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
+// Gap between words as a fraction of the font size (style.wordSpacing overrides it).
+export const defaultWordSpacing = (style) => (style.highlight === "box" ? 0.44 : 0.26);
+
 const layoutCache = new Map();
 export function clearLayoutCache() { layoutCache.clear(); }
 
 function layoutGroup(ctx, g, style, W) {
-  const key = [style.font, style.weight, style.size, style.letterSpacing || 0, style.uppercase, style.stripPunct, style.maxWidth,
+  const key = [style.font, style.weight, style.size, style.letterSpacing || 0, style.wordSpacing ?? "", style.uppercase, style.stripPunct, style.maxWidth,
     style.lineHeight, style.highlight, style.activeScale, W, ...g.words.map((w) => w.text)].join("|");
   const hit = layoutCache.get(key);
   if (hit) return hit;
   setFont(ctx, style, style.size);
-  let space = Math.max(ctx.measureText(" ").width - tracking(style, style.size), style.size * 0.26);
-  if (style.highlight === "box") space = Math.max(space, style.size * 0.44);
+  let space = style.wordSpacing != null ? style.wordSpacing * style.size : defaultWordSpacing(style) * style.size;
+  if (style.wordSpacing == null) space = Math.max(space, ctx.measureText(" ").width - tracking(style, style.size));
   // Leave room for the active word to pop without overlapping its neighbours.
-  const pop = Math.max(0, (style.activeScale || 1) - 1) / 2;
+  // (only in auto spacing: a word spacing you set yourself is the exact gap)
+  const pop = style.wordSpacing != null ? 0 : Math.max(0, (style.activeScale || 1) - 1) / 2;
   const gap = (a, b) => space + pop * Math.max(a.w, b.w);
   const maxW = W * style.maxWidth;
   const lines = [];

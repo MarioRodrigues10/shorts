@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { ClosedCaptioning, CircleNotch, Check } from "@phosphor-icons/react";
-import { CAPTION_PRESETS, drawCaptions } from "../../core/layer.js";
+import { CAPTION_PRESETS, drawCaptions, defaultWordSpacing } from "../../core/layer.js";
 import { S, commit } from "../../core/store.js";
 import * as A from "../../core/actions.js";
 import * as M from "../../core/model.js";
@@ -73,6 +73,7 @@ export default function CaptionsPanel() {
           <Select label="Case" value={cap.uppercase ? "up" : "as"} onChange={(v) => set("uppercase", v === "up")} options={[["as", "As spoken"], ["up", "UPPERCASE"]]} />
         </div>
         <Slider label="Size" value={cap.size} min={30} max={200} step={1} onChange={(v) => set("size", v)} />
+        <Slider label="Word spacing" value={cap.wordSpacing ?? defaultWordSpacing(cap)} min={0} max={0.8} step={0.01} resetTo={defaultWordSpacing(cap)} format={(v) => Math.round(v * 100) + "%"} onChange={(v) => set("wordSpacing", v)} />
         <Slider label="Letter spacing" value={cap.letterSpacing || 0} min={-0.1} max={0.2} step={0.005} resetTo={0} format={(v) => (v > 0 ? "+" : "") + Math.round(v * 100) + "%"} onChange={(v) => set("letterSpacing", v)} />
         <Switch label="Hide punctuation" checked={cap.stripPunct} onChange={(v) => set("stripPunct", v)} />
       </Section>
