@@ -112,7 +112,8 @@ DEFAULT_CONFIG = {
     "x264_preset": "medium",
     "crf": 16,
     "vaapi_qp": 14,
-    "ffmpeg_stall_seconds": 180,  # stop an ffmpeg run that makes no progress for this long
+    "ffmpeg_stall_seconds": 180,
+    "x264_threads": 6,  # CPU encodes: 6 uses ~15% less RAM than ffmpeg's default (1.5x cores) at the same quality  # stop an ffmpeg run that makes no progress for this long
 }
 
 
@@ -273,10 +274,10 @@ def video_encode_args(final=True, quality="high"):
     quality: high (GPU CQP14 ~ x264 CRF16-17) | max (CPU x264 slow CRF14) | small (GPU CQP21)."""
     if final and quality == "max":
         return ([], "", ["-c:v", "libx264", "-preset", "slow", "-crf", "14", "-profile:v", "high",
-                         "-level:v", "4.2", "-pix_fmt", "yuv420p"])
+                         "-level:v", "4.2", "-pix_fmt", "yuv420p", "-threads", str(CONFIG["x264_threads"])])
     if not final:
         # Intermediates are lossless: no generational loss before the final encode.
-        return ([], "", ["-c:v", "libx264", "-preset", "ultrafast", "-qp", "0", "-pix_fmt", "yuv420p"])
+        return ([], "", ["-c:v", "libx264", "-preset", "ultrafast", "-qp", "0", "-pix_fmt", "yuv420p", "-threads", "4"])
     dev = vaapi_device()
     if dev:
         # CQP 14 on the Intel encoder ~= x264 CRF 16-17 (SSIM 0.996) at ~8x the speed.
@@ -284,7 +285,7 @@ def video_encode_args(final=True, quality="high"):
                 ["-c:v", "h264_vaapi", "-rc_mode", "CQP", "-qp", str(21 if quality == "small" else CONFIG.get("vaapi_qp", 14)),
                  "-profile:v", "high"])
     return ([], "", ["-c:v", "libx264", "-preset", CONFIG["x264_preset"], "-crf", str(22 if quality == "small" else CONFIG["crf"]),
-                     "-profile:v", "high", "-level:v", "4.2", "-pix_fmt", "yuv420p"])
+                     "-profile:v", "high", "-level:v", "4.2", "-pix_fmt", "yuv420p", "-threads", str(CONFIG["x264_threads"])])
 
 
 FFENV = dict(os.environ, LIBVA_DRIVER_NAME="iHD")
@@ -517,7 +518,15 @@ def worker():
         with MEDIA_LOCK:
             QUEUED.discard((mid, task))
         CURRENT.update(task={"media": mid, "task": task}, progress=0.0, message=task)
+        # Whisper (~0.9 GB) never runs alongside an export or vision job (up to ~0.9 GB each):
+        # one heavy job at a time. Proxies, filmstrips and waveforms are light and don't wait.
+        heavy, held = task == "transcript", False
         try:
+            if heavy:
+                if not EXPORT_LOCK.acquire(blocking=False):
+                    CURRENT.update(message="Waiting for the export to finish")
+                    EXPORT_LOCK.acquire()
+                held = True
             set_status(mid, task, "running")
             {"proxy": task_proxy, "reproxy": task_reproxy, "sprite": task_sprite, "peaks": task_peaks,
              "transcript": task_transcript}[task](load_meta(mid), opts)
@@ -526,6 +535,8 @@ def worker():
             traceback.print_exc()
             set_status(mid, task, "error", e)
         finally:
+            if held:
+                EXPORT_LOCK.release()
             CURRENT.update(task=None, progress=0.0, message="")
 
 
@@ -555,7 +566,11 @@ def task_proxy(m, opts):
         (d / "proxy.tmp.m4a").replace(d / "proxy.m4a")
         return
     if m["kind"] == "image":
-        run_ffmpeg(["ffmpeg", "-y", "-i", m["path"], "-frames:v", "1", str(d / "proxy.tmp.png")])
+        # Preview copy only (exports read the original): at most 2160 px so a 12 MP photo doesn't
+        # decode to ~48 MB in the browser. PNG keeps transparency for stickers and logos.
+        run_ffmpeg(["ffmpeg", "-y", "-i", m["path"], "-frames:v", "1",
+                    "-vf", "scale='min(2160,iw)':'min(2160,ih)':force_original_aspect_ratio=decrease:flags=lanczos",
+                    str(d / "proxy.tmp.png")])
         (d / "proxy.tmp.png").replace(d / "proxy.png")
         return
     scale = "scale=-2:720" if m["height"] >= m["width"] else "scale=720:-2"
@@ -564,7 +579,7 @@ def task_proxy(m, opts):
     run_ffmpeg(["ffmpeg", "-y", "-i", m["path"], "-map", "0:v:0", "-map", "0:a:0?",
                 "-vf", f"fps=30,{scale}:flags=fast_bilinear,format=yuv420p", "-c:v", "libx264"] +
                (["-af", DECLIP] if clipped else []) + [
-                "-preset", "ultrafast", "-tune", "fastdecode", "-crf", "27", "-g", "15",
+                "-preset", "ultrafast", "-tune", "fastdecode", "-crf", "27", "-g", "15", "-threads", "4",
                 "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-movflags", "+faststart", str(tmp)],
                CURRENT, m["duration"])
     # New name per version: a file the browser is streaming is never rewritten in place.
@@ -1120,30 +1135,37 @@ def build_final(spec, main_file, workdir, measure=None, audio_only=False):
     fps = int(spec.get("fps", 30))
     repair = spec.get("audioOpts", {}).get("repair", True)
     total = spec["duration"]
-    inputs = ["-i", str(main_file)]
+    D = ["-threads", "2"]  # decoder threads per input: each one holds its own frame buffers
+    inputs = D + ["-i", str(main_file)]
     graph = []
     idx = 1
     ov_specs = []
     for o in spec.get("overlays", []):
         m = load_meta(o["mid"])
         if m["kind"] == "image":
-            inputs += ["-loop", "1", "-framerate", str(fps), "-t", f"{o['dur'] + 0.2:.4f}", "-i", m["path"]]
+            inputs += D + ["-loop", "1", "-framerate", str(fps), "-t", f"{o['dur'] + 0.2:.4f}", "-i", m["path"]]
         else:
             src_len = o["dur"] * float(o.get("speed", 1.0))
-            inputs += ["-ss", f"{o['in']:.4f}", "-t", f"{src_len + 0.2:.4f}", "-i", m["path"]]
+            inputs += D + ["-ss", f"{o['in']:.4f}", "-t", f"{src_len + 0.2:.4f}", "-i", m["path"]]
         ov_specs.append((o, m, idx))
         idx += 1
     aud_specs = []
     for a in spec.get("audio", []):
         m = load_meta(a["mid"])
         src_len = a["dur"] * float(a.get("speed", 1.0))
-        inputs += ["-ss", f"{a['in']:.4f}", "-t", f"{src_len + 0.2:.4f}", "-i", m["path"]]
+        inputs += D + ["-ss", f"{a['in']:.4f}", "-t", f"{src_len + 0.2:.4f}", "-i", m["path"]]
         aud_specs.append((a, m, idx))
         idx += 1
     text_idx = None
+    voice_idx = 0
     if not audio_only:
-        inputs += ["-f", "concat", "-safe", "0", "-i", str(workdir / "overlay.txt")]
+        inputs += D + ["-f", "concat", "-safe", "0", "-i", str(workdir / "overlay.txt")]
         text_idx = idx
+        idx += 1
+        # Read the main track's audio through a second, audio-only input. Sharing one input made the
+        # demuxer run ahead for audio while queueing raw lossless video packets (~200 MB at 1080p).
+        inputs += ["-vn", "-i", str(main_file)]
+        voice_idx = idx
         idx += 1
 
     # ---- video
@@ -1159,7 +1181,7 @@ def build_final(spec, main_file, workdir, measure=None, audio_only=False):
         graph.append(f"{base}[txt]overlay=0:0:format=auto:eof_action=repeat,format=yuv420p[vfinal]")
 
     # ---- audio
-    voices = ["[0:a]"]
+    voices = [f"[{voice_idx}:a]"]
     for k, (o, m, i) in enumerate(ov_specs):
         if m["kind"] == "video" and m.get("has_audio") and not o.get("mute") and float(o.get("volume", 1)) > 0:
             speed = float(o.get("speed", 1.0))
@@ -1190,7 +1212,7 @@ def build_final(spec, main_file, workdir, measure=None, audio_only=False):
     if len(voices) > 1:
         graph.append("".join(voices) + f"amix=inputs={len(voices)}:normalize=0:duration=first[voice]")
     else:
-        graph.append("[0:a]anull[voice]")
+        graph.append(f"[{voice_idx}:a]anull[voice]")
     mix = ["[voicem]"]
     if ducked:
         graph.append("[voice]asplit=2[voicem][voicesc]")
@@ -1226,7 +1248,7 @@ def build_final(spec, main_file, workdir, measure=None, audio_only=False):
 
 def export_render(job, pid, spec, workdir):
     if not EXPORT_LOCK.acquire(blocking=False):
-        job["message"] = "Waiting for the other export to finish"
+        job["message"] = "Waiting for the other export or transcription to finish"
         EXPORT_LOCK.acquire()
     try:
         return _export_render(job, pid, spec, workdir)
@@ -1265,7 +1287,7 @@ def _export_render(job, pid, spec, workdir):
         job["message"] = "Measuring loudness"
         inputs, graph = build_final(spec, main_file, workdir, audio_only=True)
         (workdir / "pass1.txt").write_text(";\n".join(graph))
-        log = run_ffmpeg(["ffmpeg", "-y"] + inputs + [filter_script_opt(), str(workdir / "pass1.txt"),
+        log = run_ffmpeg(["ffmpeg", "-y", "-filter_complex_threads", "2"] + inputs + [filter_script_opt(), str(workdir / "pass1.txt"),
                           "-map", "[afinal]", "-f", "null", "-"], job, total, 0.6, 0.05)
         mm = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", log, re.S)
         if mm:
@@ -1293,7 +1315,7 @@ def _export_render(job, pid, spec, workdir):
         k += 1
     out = out_dir / f"{name}.mp4"
     tmp_out = out_dir / f".{name}.{job['id']}.rendering.mp4"
-    cmd = (["ffmpeg", "-y"] + pre_in + inputs +
+    cmd = (["ffmpeg", "-y", "-filter_complex_threads", "2"] + pre_in + inputs +
            [filter_script_opt(), str(workdir / "final.txt"), "-map", "[vfinal]", "-map", "[afinal]"] + codec +
            ["-r", str(fps), "-g", str(fps * 2), "-color_primaries", "bt709", "-color_trc", "bt709",
             "-colorspace", "bt709", "-c:a", "aac", "-b:a", "320k", "-ar", "48000",
@@ -1309,7 +1331,7 @@ def _export_render(job, pid, spec, workdir):
         inputs, graph = build_final(spec, main_file, workdir, measure)
         (workdir / "final.txt").write_text(";\n".join(graph))
         _, _, codec = video_encode_args(final=True)
-        cmd = (["ffmpeg", "-y"] + inputs + [filter_script_opt(), str(workdir / "final.txt"),
+        cmd = (["ffmpeg", "-y", "-filter_complex_threads", "2"] + inputs + [filter_script_opt(), str(workdir / "final.txt"),
                "-map", "[vfinal]", "-map", "[afinal]"] + codec +
                ["-r", str(fps), "-g", str(fps * 2), "-c:a", "aac", "-b:a", "320k", "-ar", "48000",
                 "-movflags", "+faststart", "-frames:v", str(round(total * fps)), "-t", f"{total:.4f}", str(tmp_out)])
@@ -1856,6 +1878,10 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     for d in (MEDIA_DIR, PROJECTS_DIR, CACHE_DIR):
         d.mkdir(parents=True, exist_ok=True)
+    # Work folders of exports that never finished (crash, restart) are just disk; drop old ones.
+    for d in DATA_DIR.glob("export_*"):
+        if d.is_dir() and time.time() - d.stat().st_mtime > 6 * 3600:
+            shutil.rmtree(d, ignore_errors=True)
     # Media tasks interrupted by a restart go back in the queue.
     for f in MEDIA_DIR.glob("*/meta.json"):
         try:

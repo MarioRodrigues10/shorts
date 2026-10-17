@@ -127,7 +127,7 @@ export class Player {
       if (this.liveKeys?.has(k)) { e.used = now; continue; }
       if (now - e.used > IDLE_UNLOAD * 1000) this._drop(k);
     }
-    if (this.images.size > 40) this.images.clear();
+    if (this.images.size > 16) this.images.clear(); // decoded bitmaps live in this tab's RAM
   }
 
   _sync(el, srcT, rate, play, vol, muted, startTol = 0.05) {
