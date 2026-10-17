@@ -49,6 +49,23 @@ def low(cmd, n=10, idle_io=False):
 LOW_FLAGS = {"creationflags": 0x00004000} if IS_WIN else {}  # BELOW_NORMAL_PRIORITY_CLASS
 
 
+_FFMPEG_MAJOR = None
+
+
+def filter_script_opt():
+    """Option that reads a filter graph from a file: `-/filter_complex` on FFmpeg 7+,
+    `-filter_complex_script` before that (Ubuntu 24.04 and Debian 12 still ship FFmpeg 6)."""
+    global _FFMPEG_MAJOR
+    if _FFMPEG_MAJOR is None:
+        try:
+            out = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True).stdout
+            m = re.search(r"version \D*(\d+)\.", out)
+            _FFMPEG_MAJOR = int(m.group(1)) if m else 7
+        except OSError:
+            _FFMPEG_MAJOR = 7
+    return "-/filter_complex" if _FFMPEG_MAJOR >= 7 else "-filter_complex_script"
+
+
 def venv_python(name):
     return str(APP_DIR / name / ("Scripts/python.exe" if IS_WIN else "bin/python"))
 
@@ -1202,7 +1219,7 @@ def _export_render(job, pid, spec, workdir):
         job["message"] = "Measuring loudness"
         inputs, graph = build_final(spec, main_file, workdir, audio_only=True)
         (workdir / "pass1.txt").write_text(";\n".join(graph))
-        log = run_ffmpeg(["ffmpeg", "-y"] + inputs + ["-/filter_complex", str(workdir / "pass1.txt"),
+        log = run_ffmpeg(["ffmpeg", "-y"] + inputs + [filter_script_opt(), str(workdir / "pass1.txt"),
                           "-map", "[afinal]", "-f", "null", "-"], job, total, 0.6, 0.05)
         mm = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", log, re.S)
         if mm:
@@ -1231,7 +1248,7 @@ def _export_render(job, pid, spec, workdir):
     out = out_dir / f"{name}.mp4"
     tmp_out = out_dir / f".{name}.{job['id']}.rendering.mp4"
     cmd = (["ffmpeg", "-y"] + pre_in + inputs +
-           ["-/filter_complex", str(workdir / "final.txt"), "-map", "[vfinal]", "-map", "[afinal]"] + codec +
+           [filter_script_opt(), str(workdir / "final.txt"), "-map", "[vfinal]", "-map", "[afinal]"] + codec +
            ["-r", str(fps), "-g", str(fps * 2), "-color_primaries", "bt709", "-color_trc", "bt709",
             "-colorspace", "bt709", "-c:a", "aac", "-b:a", "320k", "-ar", "48000",
             "-movflags", "+faststart", "-frames:v", str(round(total * fps)), "-t", f"{total:.4f}", str(tmp_out)])
@@ -1246,7 +1263,7 @@ def _export_render(job, pid, spec, workdir):
         inputs, graph = build_final(spec, main_file, workdir, measure)
         (workdir / "final.txt").write_text(";\n".join(graph))
         _, _, codec = video_encode_args(final=True)
-        cmd = (["ffmpeg", "-y"] + inputs + ["-/filter_complex", str(workdir / "final.txt"),
+        cmd = (["ffmpeg", "-y"] + inputs + [filter_script_opt(), str(workdir / "final.txt"),
                "-map", "[vfinal]", "-map", "[afinal]"] + codec +
                ["-r", str(fps), "-g", str(fps * 2), "-c:a", "aac", "-b:a", "320k", "-ar", "48000",
                 "-movflags", "+faststart", "-frames:v", str(round(total * fps)), "-t", f"{total:.4f}", str(tmp_out)])
