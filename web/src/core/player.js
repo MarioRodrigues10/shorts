@@ -331,15 +331,17 @@ export class Player {
         if (!m) continue;
         const src = m.kind === "image" ? this._image(o.mid) : this.pool.get("o" + o.id)?.el;
         const v = overlayValues(o, lt);
-        const r = overlayRect(v, m, W, H);
+        const cr = cropRect(o, m.width || 1, m.height || 1);
+        const r = overlayRect(v, { width: cr.w, height: cr.h }, W, H);
         if (src && ready(src)) {
+          const kx = (src.videoWidth || src.naturalWidth) / (m.width || 1), ky = (src.videoHeight || src.naturalHeight) / (m.height || 1);
           ctx.save();
           ctx.globalAlpha = clamp(v.opacity * fadeGain(o, lt), 0, 1);
           ctx.filter = adjFilter(o.adj);
           ctx.translate(r.x + r.w / 2, r.y + r.h / 2);
           if (v.rotate) ctx.rotate(v.rotate * Math.PI / 180);
           if (o.flip) ctx.scale(-1, 1);
-          ctx.drawImage(src, -r.w / 2, -r.h / 2, r.w, r.h);
+          ctx.drawImage(src, cr.x * kx, cr.y * ky, cr.w * kx, cr.h * ky, -r.w / 2, -r.h / 2, r.w, r.h);
           ctx.restore();
         }
         boxes[o.id] = r;
@@ -387,14 +389,16 @@ export class Player {
 
   _drawMainInner(ctx, p, c, m, src, lt, W, H) {
     const vw = src.videoWidth || src.naturalWidth, vh = src.videoHeight || src.naturalHeight;
-    const sw = m.width || vw, sh = m.height || vh;
-    const kx = vw / sw, ky = vh / sh;
+    const kx = vw / (m.width || vw), ky = vh / (m.height || vh);
+    // the crop (source units) acts as the whole picture from here on
+    const cr = cropRect(c, m.width || vw, m.height || vh);
+    const sw = cr.w, sh = cr.h, ox = cr.x, oy = cr.y;
     const z = zoomAt(c, lt);
     const px = kfValue(c, "x", lt, c.x || 0), py = kfValue(c, "y", lt, c.y || 0);
     if ((c.fit || "fill") === "fill") {
       const s = Math.max(W / sw, H / sh) * Math.max(z, 1);
       const cropX = (sw * s - W) / 2 * (1 + px), cropY = (sh * s - H) / 2 * (1 + py);
-      ctx.drawImage(src, (cropX / s) * kx, (cropY / s) * ky, (W / s) * kx, (H / s) * ky, 0, 0, W, H);
+      ctx.drawImage(src, (ox + cropX / s) * kx, (oy + cropY / s) * ky, (W / s) * kx, (H / s) * ky, 0, 0, W, H);
       return;
     }
     const bg = p.canvas.bg || "blur";
@@ -403,7 +407,7 @@ export class Player {
       const sc = this.small.getContext("2d");
       const s0 = Math.max(W / sw, H / sh);
       const cw = W / s0, ch = H / s0;
-      sc.drawImage(src, (sw - cw) / 2 * kx, (sh - ch) / 2 * ky, cw * kx, ch * ky, 0, 0, this.small.width, this.small.height);
+      sc.drawImage(src, (ox + (sw - cw) / 2) * kx, (oy + (sh - ch) / 2) * ky, cw * kx, ch * ky, 0, 0, this.small.width, this.small.height);
       ctx.save();
       ctx.imageSmoothingQuality = "high";
       ctx.drawImage(this.small, 0, 0, W, H);
@@ -416,7 +420,7 @@ export class Player {
     }
     const s = Math.min(W / sw, H / sh) * z;
     const fw = sw * s, fh = sh * s;
-    ctx.drawImage(src, (W - fw) / 2 + px * W / 2, (H - fh) / 2 + py * H / 2, fw, fh);
+    ctx.drawImage(src, ox * kx, oy * ky, sw * kx, sh * ky, (W - fw) / 2 + px * W / 2, (H - fh) / 2 + py * H / 2, fw, fh);
   }
 
   // ---------------------------------------------------------------- canvas gestures
@@ -645,6 +649,15 @@ export function zoomAt(c, lt) {
 }
 
 // Mirrors overlay_clip_chain() in server.py
+// Crop c.crop = {l, r, t, b} (fraction removed from each side) as a source rect. Mirrors crop_box() in server.py.
+export function cropRect(c, sw, sh) {
+  const k = (v) => clamp(+v || 0, 0, 0.45);
+  const cr = c.crop || {}, l = k(cr.l), r = k(cr.r), t = k(cr.t), b = k(cr.b);
+  if (!(l || r || t || b)) return { x: 0, y: 0, w: sw, h: sh };
+  const ev = (v) => Math.floor(v / 2) * 2; // round down to even, like crop_box()
+  return { x: ev(sw * l), y: ev(sh * t), w: Math.max(2, ev(sw * (1 - l - r))), h: Math.max(2, ev(sh * (1 - t - b))) };
+}
+
 export function overlayRect(o, m, W, H) {
   const sw = m.width || 1, sh = m.height || 1;
   const s = o.cover ? Math.max(W / sw, H / sh) : (o.scale ?? 0.6) * W / sw;

@@ -849,6 +849,17 @@ def source_filters(c, m):
     return ",".join(f)
 
 
+def crop_box(c, sw, sh):
+    """Source-pixel crop (x, y, w, h) from c["crop"] = {l, r, t, b} (fractions per side), or None.
+    Mirrors cropRect() in player.js."""
+    cr = c.get("crop") or {}
+    l, r, t, b = (min(0.45, max(0.0, float(cr.get(k) or 0))) for k in ("l", "r", "t", "b"))
+    if not (l or r or t or b):
+        return None
+    ev = lambda v: int(v // 2) * 2  # round down to even (yuv420p); same rule as cropRect()
+    return ev(sw * l), ev(sh * t), max(2, ev(sw * (1 - l - r))), max(2, ev(sh * (1 - t - b)))
+
+
 def main_clip_filters(c, m, W, H, bg, fps=30, off=0.0):
     """Video filter for one main-track clip (or a piece of it starting at clip time `off`).
     Mirrors _drawMainInner() in player.js."""
@@ -862,6 +873,10 @@ def main_clip_filters(c, m, W, H, bg, fps=30, off=0.0):
     zexpr, animated = zoom_expr(c, dur, off)
     ev = ":eval=frame" if animated else ""
     pre = f"setpts=(PTS-STARTPTS)/{speed},fps={fps}" if speed != 1 else f"setpts=PTS-STARTPTS,fps={fps}"
+    box = crop_box(c, sw, sh)
+    if box:  # crop the raw source first; framing below then treats the crop as the whole picture
+        pre += f",crop={box[2]}:{box[3]}:{box[0]}:{box[1]}"
+        sw, sh = box[2], box[3]
     sf = source_filters(c, m)
     if sf:
         pre += "," + sf
@@ -897,7 +912,7 @@ def render_main_piece(c, W, H, bg, fps, a, b, nframes, job_progress=None, repair
     dur = nframes / fps
     declip = bool(repair and m.get("clipped"))
     key_obj = {k: c.get(k) for k in ("mid", "in", "out", "speed", "volume", "mute", "afadeIn", "afadeOut",
-                                     "fit", "zoom", "zoomEnd", "x", "y", "effect", "adj", "kf", "flip")}
+                                     "fit", "zoom", "zoomEnd", "x", "y", "effect", "adj", "kf", "flip", "crop")}
     key_obj.update(W=W, H=H, bg=bg, fps=fps, v=7, path=m["path"], declip=declip, a=round(a, 4), n=nframes)
     out, key = _cache_out(key_obj)
     if out.exists():
@@ -1029,7 +1044,12 @@ def overlay_clip_chain(o, m, W, H, idx, fps=30):
     sw, sh = max(1, m["width"]), max(1, m["height"])
     start = float(o["start"])
     sf = source_filters(o, m)
-    f = f"[{idx}:v]setpts=(PTS-STARTPTS)/{speed},fps={fps}," + (sf + "," if sf else "")
+    f = f"[{idx}:v]setpts=(PTS-STARTPTS)/{speed},fps={fps},"
+    box = crop_box(o, sw, sh)
+    if box:
+        f += f"crop={box[2]}:{box[3]}:{box[0]}:{box[1]},"
+        sw, sh = box[2], box[3]
+    f += (sf + "," if sf else "")
     if o.get("cover"):
         s = max(W / sw, H / sh)
         f += f"scale={even(sw * s)}:{even(sh * s)}:flags={SCALE_FLAGS},format=rgba"

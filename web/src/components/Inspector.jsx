@@ -216,6 +216,7 @@ function MainClip({ c, m }) {
         <KfSlider c={c} prop="y" label="Position Y" base={c.y || 0} setStatic={(v) => { c.y = v; }} min={-1} max={1} resetTo={0} />
         <Switch label="Flip horizontally" checked={c.flip} onChange={(v) => set("flip", v, true)} />
       </Section>
+      <CropSection c={c} set={set} />
       <SmartTools c={c} m={m} />
       <Section title="Motion">
         <Select label="Slow zoom (Ken Burns)" value={c.zoomEnd == null ? "off" : String(c.zoomEnd)} onChange={(v) => set("zoomEnd", v === "off" ? null : parseFloat(v), true)}
@@ -304,6 +305,22 @@ function TransitionTab({ c }) {
 }
 
 // ------------------------------------------------------------------ overlay
+// Crop: trims each side of the picture (fraction of the source), for videos and images.
+function CropSection({ c, set }) {
+  const cr = c.crop || {};
+  const any = ["l", "r", "t", "b"].some((k) => cr[k] > 0);
+  return (
+    <Section title="Crop">
+      <div className="grid grid-cols-2 gap-x-3">
+        {[["l", "Left"], ["r", "Right"], ["t", "Top"], ["b", "Bottom"]].map(([k, label]) => (
+          <Slider key={k} label={label} value={cr[k] || 0} min={0} max={0.45} step={0.005} resetTo={0} format={pct} onChange={(v) => set("crop." + k, v)} />
+        ))}
+      </div>
+      {any && <Button size="sm" variant="ghost" className="mt-1" onClick={() => set("crop", null)}>Reset crop</Button>}
+    </Section>
+  );
+}
+
 function Overlay({ c, m }) {
   const set = useSetter(c, "ov." + c.id + ".");
   const video = (
@@ -319,6 +336,7 @@ function Overlay({ c, m }) {
         <KfSlider c={c} prop="opacity" label="Opacity" base={c.opacity ?? 1} setStatic={(v) => { c.opacity = v; }} min={0} max={1} resetTo={1} format={pct} />
         <Switch label="Flip horizontally" checked={c.flip} onChange={(v) => set("flip", v, true)} />
       </Section>
+      <CropSection c={c} set={set} />
       <Section title="Fade">
         <Slider label="Fade in" value={c.fadeIn || 0} min={0} max={2} step={0.05} resetTo={0} format={sec} onChange={(v) => set("fadeIn", v)} />
         <Slider label="Fade out" value={c.fadeOut || 0} min={0} max={2} step={0.05} resetTo={0} format={sec} onChange={(v) => set("fadeOut", v)} />
