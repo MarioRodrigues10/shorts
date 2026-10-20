@@ -862,6 +862,15 @@ def zoom_expr(c, dur, off=0.0):
     return expr, animated
 
 
+def can_shrink(c):
+    """True if the clip is ever drawn below 100% (scale, slow zoom or zoom keyframes)."""
+    zs = [float(c.get("zoom", 1.0))]
+    if c.get("zoomEnd") is not None:
+        zs.append(float(c["zoomEnd"]))
+    zs += [float(k["v"]) for k in ((c.get("kf") or {}).get("zoom") or [])]
+    return min(zs) < 1 - 1e-6
+
+
 SCALE_FLAGS = "lanczos+accurate_rnd+full_chroma_int"
 
 
@@ -929,14 +938,17 @@ def main_clip_filters(c, m, W, H, bg, fps=30, off=0.0):
     sf = source_filters(c, m)
     if sf:
         pre += "," + sf
-    if c.get("fit", "fill") == "fill":
-        zexpr = f"max({zexpr},1)"  # fill can't zoom out past the frame
+    fill = c.get("fit", "fill") == "fill"
+    if fill and not can_shrink(c):
+        # covers the frame the whole time: scale up and crop (no background needed)
         s0 = max(W / sw, H / sh)
         return (f"{pre},scale=w='2*ceil({sw}*{s0}*{zexpr}/2)':h='2*ceil({sh}*{s0}*{zexpr}/2)'{ev}:flags={SCALE_FLAGS},"
                 f"crop={W}:{H}:x='(iw-{W})/2*(1+{px})':y='(ih-{H})/2*(1+{py})',setsar=1,format=yuv420p")
-    s0 = min(W / sw, H / sh)
+    s0 = (max if fill else min)(W / sw, H / sh)
     fg = (f"scale=w='2*ceil({sw}*{s0}*{zexpr}/2)':h='2*ceil({sh}*{s0}*{zexpr}/2)'{ev}:flags={SCALE_FLAGS}")
-    pos = f"x='({W}-w)/2+{px}*{W}/2':y='({H}-h)/2+{py}*{H}/2'"
+    # fill keeps the crop path's meaning of x/y (same formula), so scaling across 100% is seamless
+    pos = (f"x='({W}-w)/2*(1+{px})':y='({H}-h)/2*(1+{py})'" if fill else
+           f"x='({W}-w)/2+{px}*{W}/2':y='({H}-h)/2+{py}*{H}/2'")
     if bg == "blur":
         back = (f"scale={W // 4}:{H // 4}:force_original_aspect_ratio=increase,crop={W // 4}:{H // 4},"
                 f"boxblur=12:2,eq=brightness=-0.12:saturation=1.1,scale={W}:{H}")

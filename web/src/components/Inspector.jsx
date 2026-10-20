@@ -211,7 +211,7 @@ function MainClip({ c, m }) {
     <>
       <Section title="Frame">
         <Segmented label="Fit" value={c.fit || "fill"} onChange={(v) => set("fit", v)} options={[["fill", "Fill frame"], ["fit", "Show whole video"]]} />
-        <KfSlider c={c} prop="zoom" label="Scale" base={c.zoom ?? 1} setStatic={(v) => { c.zoom = v; }} min={c.fit === "fit" ? 0.5 : 1} max={3} resetTo={1} format={pct} />
+        <KfSlider c={c} prop="zoom" label="Scale" base={c.zoom ?? 1} setStatic={(v) => { c.zoom = v; }} min={0.25} max={3} resetTo={1} format={pct} />
         <KfSlider c={c} prop="x" label="Position X" base={c.x || 0} setStatic={(v) => { c.x = v; }} min={-1} max={1} resetTo={0} />
         <KfSlider c={c} prop="y" label="Position Y" base={c.y || 0} setStatic={(v) => { c.y = v; }} min={-1} max={1} resetTo={0} />
         <Switch label="Flip horizontally" checked={c.flip} onChange={(v) => set("flip", v, true)} />

@@ -395,8 +395,9 @@ export class Player {
     const sw = cr.w, sh = cr.h, ox = cr.x, oy = cr.y;
     const z = zoomAt(c, lt);
     const px = kfValue(c, "x", lt, c.x || 0), py = kfValue(c, "y", lt, c.y || 0);
-    if ((c.fit || "fill") === "fill") {
-      const s = Math.max(W / sw, H / sh) * Math.max(z, 1);
+    const fill = (c.fit || "fill") === "fill";
+    if (fill && z >= 1) {
+      const s = Math.max(W / sw, H / sh) * z;
       const cropX = (sw * s - W) / 2 * (1 + px), cropY = (sh * s - H) / 2 * (1 + py);
       ctx.drawImage(src, (ox + cropX / s) * kx, (oy + cropY / s) * ky, (W / s) * kx, (H / s) * ky, 0, 0, W, H);
       return;
@@ -418,9 +419,12 @@ export class Player {
       ctx.fillStyle = bg === "black" ? "#000" : bg;
       ctx.fillRect(0, 0, W, H);
     }
-    const s = Math.min(W / sw, H / sh) * z;
+    // fill below 100% uses the crop path's x/y meaning (same formula), so scaling across 100% is seamless
+    const s = (fill ? Math.max(W / sw, H / sh) : Math.min(W / sw, H / sh)) * z;
     const fw = sw * s, fh = sh * s;
-    ctx.drawImage(src, ox * kx, oy * ky, sw * kx, sh * ky, (W - fw) / 2 + px * W / 2, (H - fh) / 2 + py * H / 2, fw, fh);
+    const dx = fill ? (W - fw) / 2 * (1 + px) : (W - fw) / 2 + px * W / 2;
+    const dy = fill ? (H - fh) / 2 * (1 + py) : (H - fh) / 2 + py * H / 2;
+    ctx.drawImage(src, ox * kx, oy * ky, sw * kx, sh * ky, dx, dy, fw, fh);
   }
 
   // ---------------------------------------------------------------- canvas gestures
