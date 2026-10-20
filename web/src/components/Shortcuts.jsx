@@ -7,7 +7,7 @@ export const openShortcuts = () => emit("shortcuts");
 const GROUPS = [
   ["Playback", [["Space", "Play / pause"], ["← →", "Previous / next frame"], ["Shift  ← →", "Back / forward 1s"], ["↑ ↓", "Previous / next cut"], ["Home  End", "Start / end"]]],
   ["Editing", [["S", "Split at playhead"], ["Q", "Delete left of playhead"], ["W", "Delete right of playhead"], ["Del", "Delete selection"], ["Ctrl D", "Duplicate"], ["Ctrl C  Ctrl V", "Copy / paste"], ["T", "Add text"], ["M", "Add marker"]]],
-  ["General", [["Ctrl Z", "Undo"], ["Ctrl Y", "Redo"], ["+ −", "Zoom timeline"], ["Ctrl E", "Export"], ["?", "This list"]]],
+  ["General", [["Ctrl Z", "Undo"], ["Ctrl Y", "Redo"], ["+ −", "Zoom timeline"], ["Ctrl E", "Export"], ["\\", "Bigger preview"], ["?", "This list"]]],
 ];
 
 export default function Shortcuts() {

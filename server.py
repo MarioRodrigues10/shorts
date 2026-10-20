@@ -529,7 +529,7 @@ def worker():
                 held = True
             set_status(mid, task, "running")
             {"proxy": task_proxy, "reproxy": task_reproxy, "sprite": task_sprite, "peaks": task_peaks,
-             "transcript": task_transcript}[task](load_meta(mid), opts)
+             "transcript": task_transcript, "upgrade": task_proxy}[task](load_meta(mid), opts)
             set_status(mid, task, "done")
         except Exception as e:
             traceback.print_exc()
@@ -573,20 +573,25 @@ def task_proxy(m, opts):
                     str(d / "proxy.tmp.png")])
         (d / "proxy.tmp.png").replace(d / "proxy.png")
         return
-    scale = "scale=-2:720" if m["height"] >= m["width"] else "scale=720:-2"
+    # Sized for the preview it feeds, never upscaled. Benchmarked seeks (Firefox, long-GOP source):
+    # vertical 540x960 / GOP 15 ~6 ms (p95 10); landscape 1280x720 / GOP 8 ~8 ms (p95 13).
+    wide = m["width"] > m["height"]
+    long_side = min(1280 if wide else 960, max(m["width"], m["height"]) // 2 * 2)
+    scale = f"scale={long_side}:-2" if wide else f"scale=-2:{long_side}"
+    gop = "8" if wide else "15"
     rev = int(m.get("proxy_rev", 0)) + (1 if (d / proxy_name(m)).exists() else 0)
     tmp = d / "proxy.tmp.mp4"
     run_ffmpeg(["ffmpeg", "-y", "-i", m["path"], "-map", "0:v:0", "-map", "0:a:0?",
                 "-vf", f"fps=30,{scale}:flags=fast_bilinear,format=yuv420p", "-c:v", "libx264"] +
                (["-af", DECLIP] if clipped else []) + [
-                "-preset", "ultrafast", "-tune", "fastdecode", "-crf", "27", "-g", "15", "-threads", "4",
+                "-preset", "ultrafast", "-tune", "fastdecode", "-crf", "27", "-g", gop, "-threads", "4",
                 "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-movflags", "+faststart", str(tmp)],
                CURRENT, m["duration"])
     # New name per version: a file the browser is streaming is never rewritten in place.
     new = d / ("proxy.mp4" if rev == 0 else f"proxy.{rev}.mp4")
     tmp.replace(new)
     old = d / proxy_name(m)
-    update_meta(m["id"], proxy_rev=rev)
+    update_meta(m["id"], proxy_rev=rev, proxy_v=PROXY_V)
     if old != new and old.exists():
         threading.Timer(120, lambda: old.unlink(missing_ok=True)).start()
 
@@ -594,6 +599,9 @@ def task_proxy(m, opts):
 def proxy_name(m):
     rev = int(m.get("proxy_rev", 0))
     return "proxy.mp4" if rev == 0 else f"proxy.{rev}.mp4"
+
+
+PROXY_V = 2  # 2: 540x960 vertical / 1280x720 landscape (v1 was 720 on the long side: blurry when wide)
 
 
 def task_reproxy(m, opts):
@@ -1744,6 +1752,10 @@ class Handler(BaseHTTPRequestHandler):
             for i in ids:
                 meta = load_meta(check_id(i))
                 if meta:
+                    # opening a project upgrades its old, low-res preview copies in the background
+                    if (meta["kind"] == "video" and meta.get("proxy_v", 1) != PROXY_V and Path(meta["path"]).exists()
+                            and (mdir(meta["id"]) / proxy_name(meta)).exists()):
+                        _put(5, meta["id"], "upgrade")
                     out.append(media_public(meta))
             return self.send_json(out)
         m = re.fullmatch(r"/media/([0-9a-f]{12})/(preview|sprite\.jpg|peaks\.json|words\.json)", path)

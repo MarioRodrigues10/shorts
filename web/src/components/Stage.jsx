@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Play, Pause, SkipBack, SkipForward, DeviceMobile, FrameCorners } from "@phosphor-icons/react";
+import { Play, Pause, SkipBack, SkipForward, DeviceMobile, FrameCorners, ArrowsOut } from "@phosphor-icons/react";
 import { S, layer, select, begin, changed, clipById } from "../core/store.js";
 import { Player, endOfMain } from "../core/player.js";
+import { CAPTION_PRESETS } from "../core/layer.js";
 import { fmt, emit } from "../core/util.js";
 import { useBus } from "../lib/hooks.js";
 import { IconBtn, Tip, Button, Popover } from "./ui/index.jsx";
@@ -13,6 +14,19 @@ import { commit } from "../core/store.js";
 export const timeListeners = new Set();
 
 const RATIOS = [[1080, 1920, "9:16", "Reels, TikTok, Shorts"], [1080, 1350, "4:5", "Instagram feed"], [1080, 1080, "1:1", "Square"], [1920, 1080, "16:9", "YouTube"]];
+
+// Switching between vertical and landscape moves captions to where that format expects them
+// (lower third for 16:9), unless they were placed somewhere else by hand.
+const LANDSCAPE_POS_Y = 0.84;
+function setAspect(p, w, h) {
+  const wasWide = p.canvas.w > p.canvas.h, wide = w > h;
+  p.canvas.w = w; p.canvas.h = h;
+  const cap = p.captions;
+  if (!cap || wasWide === wide) return;
+  const presetY = CAPTION_PRESETS[cap.preset]?.posY ?? 0.64;
+  if (wide && Math.abs(cap.posY - presetY) < 0.02) cap.posY = LANDSCAPE_POS_Y;
+  else if (!wide && Math.abs(cap.posY - LANDSCAPE_POS_Y) < 0.02) cap.posY = presetY;
+}
 
 export default function Stage() {
   useBus(["changed"]);
@@ -84,7 +98,7 @@ export default function Stage() {
             <div className="w-56">
               <div className="mb-2 text-xs font-medium text-muted">Canvas size</div>
               {RATIOS.map(([w, h, l, d]) => (
-                <button key={l} onClick={() => { commit(() => { S.p.canvas.w = w; S.p.canvas.h = h; }); S.player.resize(); }}
+                <button key={l} onClick={() => { commit(() => setAspect(S.p, w, h)); S.player.resize(); }}
                   className={`flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-surface-4 cursor-pointer ${ratio[2] === l ? "text-accent" : ""}`}>
                   <span className="flex h-7 w-7 items-center justify-center">
                     <span className="rounded-[3px] border-2 border-current" style={{ width: w > h ? 22 : 22 * w / h, height: h > w ? 22 : 22 * h / w }} />
@@ -94,8 +108,9 @@ export default function Stage() {
               ))}
             </div>
           </Popover>
-          <IconBtn icon={FrameCorners} label={guides ? "Hide safe zones" : "Show where app buttons cover the video"} active={guides}
-            onClick={() => { S.player.guides = !guides; setGuides(!guides); S.player.invalidate(); }} />
+          {S.p.canvas.h > S.p.canvas.w && <IconBtn icon={FrameCorners} label={guides ? "Hide safe zones" : "Show where app buttons cover the video"} active={guides}
+            onClick={() => { S.player.guides = !guides; setGuides(!guides); S.player.invalidate(); }} />}
+          <IconBtn icon={ArrowsOut} label="Bigger preview" kbd={"\\"} onClick={() => emit("toggle-panels")} />
         </div>
       </div>
     </section>

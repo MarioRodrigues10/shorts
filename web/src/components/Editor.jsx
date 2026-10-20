@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, FPS } from "../core/util.js";
+import { api, FPS, on, emit } from "../core/util.js";
 import { S, undo, redo, select, save, changed } from "../core/store.js";
 import * as M from "../core/model.js";
 import * as Media from "../core/media.js";
@@ -30,6 +30,9 @@ export default function Editor({ id }) {
   const [rightW, setRightW] = usePanelSize("right", 330, 280, 560);
   const [tlH, setTlH] = usePanelSize("timeline", 330, 190, 900);
   const [error, setError] = useState(null);
+  const [wide, setWide] = useState(false); // "Bigger preview": side panels hidden
+  useEffect(() => on("toggle-panels", () => setWide((x) => !x)), []);
+  useEffect(() => { S.player?.resize(); }, [wide]);
 
   useEffect(() => {
     let alive = true;
@@ -75,14 +78,18 @@ export default function Editor({ id }) {
     <div className="flex h-full flex-col">
       <TopBar />
       <div className="flex min-h-0 flex-1">
-        <LeftPanel width={leftW} />
-        <Resizer size={leftW} onSize={(v) => setLeftW(v ?? 340)} />
+        {!wide && <>
+          <LeftPanel width={leftW} />
+          <Resizer size={leftW} onSize={(v) => setLeftW(v ?? 340)} />
+        </>}
         <Stage />
-        <Resizer size={rightW} invert onSize={(v) => setRightW(v ?? 330)} />
-        <Inspector width={rightW} />
+        {!wide && <>
+          <Resizer size={rightW} invert onSize={(v) => setRightW(v ?? 330)} />
+          <Inspector width={rightW} />
+        </>}
       </div>
       <Resizer dir="h" size={tlH} invert onSize={(v) => setTlH(Math.min(v ?? 330, window.innerHeight - 260))} />
-      <TimelineView height={tlH} />
+      <TimelineView height={wide ? Math.min(tlH, 200) : tlH} />
       <ExportDialog />
       <Shortcuts />
     </div>
@@ -110,6 +117,7 @@ function handleKey(e) {
   if (mod && k === "a") return go(() => select(M.allClips(S.p).map((x) => x.clip.id)));
   if (mod) return;
   if (e.key === "?") return go(openShortcuts);
+  if (e.key === "\\") return go(() => emit("toggle-panels"));
   if (e.key === " ") return go(() => S.player.toggle());
   if (k === "s") return go(A.split);
   if (k === "q") return go(() => A.trimTo("left"));
