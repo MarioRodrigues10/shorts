@@ -19,7 +19,7 @@ jobs:
         working-directory: web
         run: bun run build
       - name: Python compiles
-        run: python3 -m py_compile server.py transcribe.py vision.py shorts docs/mascot/build.py scripts/demo/*.py
+        run: python3 -m py_compile server.py transcribe.py breaths.py vision.py shorts docs/mascot/build.py scripts/demo/*.py
       - name: No media, user data or local paths in the repo
         run: scripts/check-no-data.sh
 

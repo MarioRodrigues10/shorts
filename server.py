@@ -964,7 +964,42 @@ def _cache_out(key_obj):
     return CACHE_DIR / f"{key}.mkv", key
 
 
-def render_main_piece(c, W, H, bg, fps, a, b, nframes, job_progress=None, repair=True):
+BREATH_GAIN = 10 ** (-24 / 20)  # "Lower breaths": -24 dB, with 30 ms ramps
+BREATH_RAMP = 0.03
+
+
+def breaths_for(m):
+    """Breaths in this media (source seconds), from breaths.py; recomputed when the transcript changes."""
+    d = mdir(m["id"])
+    words, out = d / "words.json", d / "breaths.json"
+    if m.get("kind") != "video" and m.get("kind") != "audio" or not words.exists() or not Path(m["path"]).exists():
+        return []
+    if not out.exists() or out.stat().st_mtime < words.stat().st_mtime:
+        tmp = d / "breaths.tmp.json"
+        r = subprocess.run(low([venv_python(".venv"), str(APP_DIR / "breaths.py"), m["path"], str(words), str(tmp)], 15),
+                           capture_output=True, text=True, **LOW_FLAGS)
+        if r.returncode != 0 or not tmp.exists():
+            print("breaths.py failed:", r.stderr[-400:], flush=True)
+            return []
+        tmp.replace(out)
+    try:
+        return json.loads(out.read_text()).get("breaths", [])
+    except (OSError, ValueError):
+        return []
+
+
+def breath_gain_expr(breaths, src_in, src_len):
+    """Volume expression (t = seconds since src_in, source time) that dips each breath."""
+    terms = []
+    for b0, b1 in breaths:
+        if b1 <= src_in or b0 >= src_in + src_len:
+            continue
+        x0, x1 = b0 - src_in, b1 - src_in
+        terms.append(f"(1-{1 - BREATH_GAIN:.4f}*clip(min((t-{x0:.3f})/{BREATH_RAMP},({x1:.3f}-t)/{BREATH_RAMP}),0,1))")
+    return "*".join(terms)
+
+
+def render_main_piece(c, W, H, bg, fps, a, b, nframes, job_progress=None, repair=True, breaths=None):
     """Render clip time [a, b] of one main-track clip to a cached lossless intermediate of exactly
     `nframes` frames (H.264 qp0 + PCM)."""
     m = load_meta(c["mid"])
@@ -975,6 +1010,8 @@ def render_main_piece(c, W, H, bg, fps, a, b, nframes, job_progress=None, repair
     key_obj = {k: c.get(k) for k in ("mid", "in", "out", "speed", "volume", "mute", "afadeIn", "afadeOut",
                                      "fit", "zoom", "zoomEnd", "x", "y", "effect", "adj", "kf", "flip", "crop")}
     key_obj.update(W=W, H=H, bg=bg, fps=fps, v=7, path=m["path"], declip=declip, a=round(a, 4), n=nframes)
+    if breaths:
+        key_obj.update(breaths=breaths, breath_gain=round(BREATH_GAIN, 4))
     out, key = _cache_out(key_obj)
     if out.exists():
         return out
@@ -993,6 +1030,10 @@ def render_main_piece(c, W, H, bg, fps, a, b, nframes, job_progress=None, repair
         ach = "[0:a]asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo"
         if declip:
             ach += "," + DECLIP
+        if breaths:  # before atempo: breath times are source seconds from src_in
+            g = breath_gain_expr(breaths, src_in, dur * speed + 0.25)
+            if g:
+                ach += f",volume='{g}':eval=frame"
         if speed != 1:
             ach += "," + atempo_chain(speed)
         ach += f",volume={vol},apad,atrim=0:{dur:.5f}"
@@ -1056,6 +1097,13 @@ def render_main_track(spec, job, fps, repair):
     total_work = sum(durs) or 1
     done = [0.0]
     parts, pending_tail = [], None
+    breath_lists = {}
+    if (spec.get("audioOpts") or {}).get("breaths"):
+        job["message"] = "Finding breaths"
+        for c in clips:
+            if c["mid"] not in breath_lists:
+                m = load_meta(c["mid"])
+                breath_lists[c["mid"]] = breaths_for(m) if m else []
 
     def piece(i, a, b):
         c, g0 = clips[i], float(clips[i]["start"])
@@ -1065,7 +1113,7 @@ def render_main_track(spec, job, fps, repair):
         sub = {"p": 0.0}
         start = done[0]
         prog = _ProgressProxy(sub, lambda: job.__setitem__("progress", 0.6 * (start + sub["p"] * (b - a)) / total_work))
-        return render_main_piece(c, W, H, bg, fps, a, b, n, prog, repair), n
+        return render_main_piece(c, W, H, bg, fps, a, b, n, prog, repair, breath_lists.get(c["mid"])), n
 
     prev_end = 0.0
     for i, c in enumerate(clips):
@@ -1770,11 +1818,13 @@ class Handler(BaseHTTPRequestHandler):
                         _put(5, meta["id"], "upgrade")
                     out.append(media_public(meta))
             return self.send_json(out)
-        m = re.fullmatch(r"/media/([0-9a-f]{12})/(preview|sprite\.jpg|peaks\.json|words\.json)", path)
+        m = re.fullmatch(r"/media/([0-9a-f]{12})/(preview|sprite\.jpg|peaks\.json|words\.json|breaths\.json)", path)
         if m:
             meta = load_meta(m.group(1))
             if not meta:
                 return self.send_json({"error": "no such media"}, 404)
+            if m.group(2) == "breaths.json":
+                return self.send_json({"breaths": breaths_for(meta)})
             if m.group(2) == "preview":
                 return self.send_file(preview_file(meta))
             return self.send_file(mdir(meta["id"]) / m.group(2), cache=m.group(2) != "words.json")

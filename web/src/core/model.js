@@ -571,7 +571,7 @@ export function normalize(p) {
     }
   }
   p.captions = Object.assign(defaultCaptions(), p.captions || {});
-  p.audio = Object.assign({ normalize: true, lufs: -14, enhance: false, repair: true }, p.audio || {});
+  p.audio = Object.assign({ normalize: true, lufs: -14, enhance: false, repair: true, breaths: false }, p.audio || {});
   p.wordEdits = p.wordEdits || {};
   p.media = p.media || [];
   p.markers = p.markers || [];

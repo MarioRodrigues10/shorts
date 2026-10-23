@@ -169,6 +169,7 @@ export class Player {
     const main = mainT.clips;
     const live = new Set();
     const vol = (x) => (this.muteAll ? 0 : x);
+    const breath = (mid, srcT) => (p.audio?.breaths ? Media.breathGain(mid, srcT) : 1); // "Lower breaths"
     // ---- main track (two clips overlap during a transition)
     const ci = mainIndexAt(main, t);
     const c = ci >= 0 ? main[ci] : null;
@@ -193,12 +194,12 @@ export class Player {
             t = Math.max(nt, this.lastT ?? 0);
             this.t0 = t; this.p0 = performance.now();
           }
-          mainEl.volume = clamp(vol((c.volume ?? 1) * tp), 0, 1);
+          mainEl.volume = clamp(vol((c.volume ?? 1) * tp * breath(c.mid, mainEl.currentTime)), 0, 1);
           mainEl.muted = muted;
         } else {
           // Switching to a clip that was pre-seeked: just start it and keep the clock running
           // (its first frame is already decoded). Only a real seek holds the clock.
-          this._sync(mainEl, srcT, c.speed || 1, this.playing, vol((c.volume ?? 1) * tp), muted, 0.12);
+          this._sync(mainEl, srcT, c.speed || 1, this.playing, vol((c.volume ?? 1) * tp * breath(c.mid, srcT)), muted, 0.12);
           if (this.playing && mainEl.seeking) { this.t0 = t; this.p0 = performance.now(); }
         }
         this.mainKey = key;
@@ -210,7 +211,7 @@ export class Player {
           live.add(key);
           prevEl = this._get(key, prev.mid);
           const srcT = prev.in + (t - prev.start) * (prev.speed || 1);
-          this._sync(prevEl, srcT, prev.speed || 1, this.playing, vol((prev.volume ?? 1) * (1 - tp)), !!(prev.mute || mainT.muted));
+          this._sync(prevEl, srcT, prev.speed || 1, this.playing, vol((prev.volume ?? 1) * (1 - tp) * breath(prev.mid, srcT)), !!(prev.mute || mainT.muted));
         }
       }
     }

@@ -31,7 +31,7 @@ function set(m) {
   if (old) {
     if (!old.ready.peaks && m.ready.peaks) peaks.delete(m.id);
     if (!old.ready.sprite && m.ready.sprite) sprites.delete(m.id);
-    if (JSON.stringify(old.covered) !== JSON.stringify(m.covered)) { words.delete(m.id); wordsLoading.delete(m.id); }
+    if (JSON.stringify(old.covered) !== JSON.stringify(m.covered)) { words.delete(m.id); wordsLoading.delete(m.id); breaths.delete(m.id); }
   }
   if (!old || JSON.stringify(old.ready) !== JSON.stringify(m.ready) || JSON.stringify(old.working) !== JSON.stringify(m.working)
       || JSON.stringify(old.status) !== JSON.stringify(m.status) || JSON.stringify(old.covered) !== JSON.stringify(m.covered)) emit("media", m);
@@ -74,6 +74,26 @@ export function getSprite(mid) {
 }
 
 const wordsLoading = new Map(); // mid -> promise of the fetch in flight
+const breaths = new Map(); // mid -> [[start, end], ...] in source seconds (null while loading)
+
+// Volume factor for "Lower breaths" at source time t: -24 dB inside a breath, 30 ms ramps.
+// Mirrors breath_gain_expr() in server.py.
+export function breathGain(mid, t) {
+  const m = metas.get(mid);
+  if (!m?.ready.words) return 1;
+  if (!breaths.has(mid)) {
+    breaths.set(mid, null);
+    fetch(`/media/${mid}/breaths.json`).then((r) => r.json()).then((d) => breaths.set(mid, d.breaths || []))
+      .catch(() => breaths.delete(mid));
+  }
+  let g = 1;
+  for (const [b0, b1] of breaths.get(mid) || []) {
+    if (t <= b0 || t >= b1) continue;
+    g *= 1 - (1 - 0.0631) * Math.min(1, Math.max(0, Math.min((t - b0) / 0.03, (b1 - t) / 0.03)));
+  }
+  return g;
+}
+
 
 export function getWords(mid) {
   const m = metas.get(mid);

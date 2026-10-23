@@ -488,6 +488,8 @@ function ProjectPanel() {
         <Switch label="Normalize loudness" hint="−14 LUFS, the level social apps play at" checked={p.audio.normalize} onChange={(v) => set("audio.normalize", v)} />
         <Switch label="Repair distorted audio" hint="Rebuilds clipped peaks when the mic was too loud" checked={p.audio.repair !== false} onChange={(v) => set("audio.repair", v)} />
         <Switch label="Voice enhance" hint="Removes rumble and steady background noise" checked={p.audio.enhance} onChange={(v) => set("audio.enhance", v)} />
+        <Switch label="Lower breaths" hint="Makes breathing between sentences almost silent. Your timing stays the same. Needs a transcript."
+          checked={!!p.audio.breaths} onChange={(v) => set("audio.breaths", v)} />
       </Section>
       <Section title="Default style">
         <Button className="w-full justify-center" onClick={async () => { await api("/api/defaults", { captions: p.captions, canvas: p.canvas, audio: p.audio }); toast.success("Saved as your default style"); }}>
