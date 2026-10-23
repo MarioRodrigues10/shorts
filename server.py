@@ -966,15 +966,18 @@ def _cache_out(key_obj):
 
 BREATH_GAIN = 10 ** (-24 / 20)  # "Lower breaths": -24 dB, with 30 ms ramps
 BREATH_RAMP = 0.03
-BREATHS_V = 2  # breaths.py output version; older detections are recomputed
+BREATHS_V = 3  # breaths.py output version; older detections are recomputed
+EDGE = 0.12    # a breath fragment this close to a cut is the leftover of a breath
 
 
 def breaths_for(m):
-    """Breaths in this media (source seconds), from breaths.py; recomputed when the transcript changes."""
+    """{"breaths": [...], "fragments": [...]} in source seconds, from breaths.py; recomputed when the
+    transcript changes."""
     d = mdir(m["id"])
     words, out = d / "words.json", d / "breaths.json"
+    none = {"breaths": [], "fragments": []}
     if m.get("kind") != "video" and m.get("kind") != "audio" or not words.exists() or not Path(m["path"]).exists():
-        return []
+        return none
     stale = not out.exists() or out.stat().st_mtime < words.stat().st_mtime
     if not stale:
         try:
@@ -987,12 +990,21 @@ def breaths_for(m):
                            capture_output=True, text=True, **LOW_FLAGS)
         if r.returncode != 0 or not tmp.exists():
             print("breaths.py failed:", r.stderr[-400:], flush=True)
-            return []
+            return none
         tmp.replace(out)
     try:
-        return json.loads(out.read_text()).get("breaths", [])
+        d = json.loads(out.read_text())
+        return {"breaths": d.get("breaths", []), "fragments": d.get("fragments", [])}
     except (OSError, ValueError):
-        return []
+        return none
+
+
+def clip_breaths(found, c):
+    """Ranges to lower in one clip: its breaths, plus fragments touching its cut points.
+    Mirrors clipBreaths() in media.js."""
+    a, b = float(c["in"]), float(c["out"])
+    edge = [f for f in found["fragments"] if f[0] <= a + EDGE and f[1] >= a or f[1] >= b - EDGE and f[0] <= b]
+    return sorted(found["breaths"] + edge)
 
 
 def breath_gain_expr(breaths, src_in, src_len):
@@ -1104,13 +1116,14 @@ def render_main_track(spec, job, fps, repair):
     total_work = sum(durs) or 1
     done = [0.0]
     parts, pending_tail = [], None
-    breath_lists = {}
+    breath_lists, found = {}, {}
     if (spec.get("audioOpts") or {}).get("breaths"):
         job["message"] = "Finding breaths"
-        for c in clips:
-            if c["mid"] not in breath_lists:
+        for i, c in enumerate(clips):
+            if c["mid"] not in found:
                 m = load_meta(c["mid"])
-                breath_lists[c["mid"]] = breaths_for(m) if m else []
+                found[c["mid"]] = breaths_for(m) if m else {"breaths": [], "fragments": []}
+            breath_lists[i] = clip_breaths(found[c["mid"]], c)
 
     def piece(i, a, b):
         c, g0 = clips[i], float(clips[i]["start"])
@@ -1120,7 +1133,7 @@ def render_main_track(spec, job, fps, repair):
         sub = {"p": 0.0}
         start = done[0]
         prog = _ProgressProxy(sub, lambda: job.__setitem__("progress", 0.6 * (start + sub["p"] * (b - a)) / total_work))
-        return render_main_piece(c, W, H, bg, fps, a, b, n, prog, repair, breath_lists.get(c["mid"])), n
+        return render_main_piece(c, W, H, bg, fps, a, b, n, prog, repair, breath_lists.get(i)), n
 
     prev_end = 0.0
     for i, c in enumerate(clips):
@@ -1831,7 +1844,7 @@ class Handler(BaseHTTPRequestHandler):
             if not meta:
                 return self.send_json({"error": "no such media"}, 404)
             if m.group(2) == "breaths.json":
-                return self.send_json({"breaths": breaths_for(meta)})
+                return self.send_json(breaths_for(meta))
             if m.group(2) == "preview":
                 return self.send_file(preview_file(meta))
             return self.send_file(mdir(meta["id"]) / m.group(2), cache=m.group(2) != "words.json")

@@ -74,20 +74,30 @@ export function getSprite(mid) {
 }
 
 const wordsLoading = new Map(); // mid -> promise of the fetch in flight
-const breaths = new Map(); // mid -> [[start, end], ...] in source seconds (null while loading)
+const breaths = new Map(); // mid -> {breaths, fragments} in source seconds (null while loading)
+const EDGE = 0.12; // a fragment this close to a cut is the leftover of a breath
 
-// Volume factor for "Lower breaths" at source time t: -24 dB inside a breath, 30 ms ramps.
-// Mirrors breath_gain_expr() in server.py.
-export function breathGain(mid, t) {
-  const m = metas.get(mid);
-  if (!m?.ready.words) return 1;
+// Ranges to lower in one clip: its breaths plus fragments touching its cut points.
+// Mirrors clip_breaths() in server.py.
+function clipBreaths(c) {
+  const mid = c.mid, m = metas.get(mid);
+  if (!m?.ready.words) return [];
   if (!breaths.has(mid)) {
     breaths.set(mid, null);
-    fetch(`/media/${mid}/breaths.json`).then((r) => r.json()).then((d) => breaths.set(mid, d.breaths || []))
+    fetch(`/media/${mid}/breaths.json`).then((r) => r.json()).then((d) => breaths.set(mid, d))
       .catch(() => breaths.delete(mid));
   }
+  const d = breaths.get(mid);
+  if (!d) return [];
+  const edge = (d.fragments || []).filter(([f0, f1]) => (f0 <= c.in + EDGE && f1 >= c.in) || (f1 >= c.out - EDGE && f0 <= c.out));
+  return edge.length ? [...(d.breaths || []), ...edge] : d.breaths || [];
+}
+
+// Volume factor for "Lower breaths" in clip c at source time t: -24 dB inside a breath, 30 ms ramps.
+// Mirrors breath_gain_expr() in server.py.
+export function breathGain(c, t) {
   let g = 1;
-  for (const [b0, b1] of breaths.get(mid) || []) {
+  for (const [b0, b1] of clipBreaths(c)) {
     if (t <= b0 || t >= b1) continue;
     g *= 1 - (1 - 0.0631) * Math.min(1, Math.max(0, Math.min((t - b0) / 0.03, (b1 - t) / 0.03)));
   }
