@@ -966,6 +966,7 @@ def _cache_out(key_obj):
 
 BREATH_GAIN = 10 ** (-24 / 20)  # "Lower breaths": -24 dB, with 30 ms ramps
 BREATH_RAMP = 0.03
+BREATHS_V = 2  # breaths.py output version; older detections are recomputed
 
 
 def breaths_for(m):
@@ -974,7 +975,13 @@ def breaths_for(m):
     words, out = d / "words.json", d / "breaths.json"
     if m.get("kind") != "video" and m.get("kind") != "audio" or not words.exists() or not Path(m["path"]).exists():
         return []
-    if not out.exists() or out.stat().st_mtime < words.stat().st_mtime:
+    stale = not out.exists() or out.stat().st_mtime < words.stat().st_mtime
+    if not stale:
+        try:
+            stale = json.loads(out.read_text()).get("version") != BREATHS_V
+        except (OSError, ValueError):
+            stale = True
+    if stale:
         tmp = d / "breaths.tmp.json"
         r = subprocess.run(low([venv_python(".venv"), str(APP_DIR / "breaths.py"), m["path"], str(words), str(tmp)], 15),
                            capture_output=True, text=True, **LOW_FLAGS)
