@@ -84,6 +84,7 @@ So I built my own: the editing flow I liked in CapCut, running natively on Linux
 **Look and sound**
 - Color looks and adjustments: brightness, contrast, saturation, temperature, sharpen, denoise.
 - **Clean surface**: draw a box over a desk or mat and dust, lint and crumbs disappear.
+- **Phone frame**: play your video inside a phone (black or silver) on a gradient, colour or blurred background, like a device mockup.
 - **Auto reframe** follows your face to turn landscape footage into 9:16. **Background replacement** with blur or a color.
 - Music and sound effects that duck under your voice automatically, plus voiceover recording.
 - Loudness normalization to −14 LUFS, voice enhance, automatic repair of clipped (distorted) audio, and **Lower breaths**, which makes breathing between sentences almost silent without changing your timing.

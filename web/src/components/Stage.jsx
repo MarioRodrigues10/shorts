@@ -5,6 +5,7 @@ import { Player, endOfMain } from "../core/player.js";
 import { CAPTION_PRESETS } from "../core/layer.js";
 import { fmt, emit, on, clamp } from "../core/util.js";
 import { surfaceLevel } from "../core/clean.js";
+import { deviceLayout } from "../core/device.js";
 import { useBus } from "../lib/hooks.js";
 import { IconBtn, Tip, Button, Popover } from "./ui/index.jsx";
 import { jumpCut } from "./Editor.jsx";
@@ -36,18 +37,23 @@ function CleanPicker({ canvasRef, wrapRef }) {
   useEffect(() => on("pick-clean", (id) => { setClipId(id); setBox(null); }), []);
   if (!clipId || !canvasRef.current) return null;
   const cr = canvasRef.current.getBoundingClientRect(), wr = wrapRef.current.getBoundingClientRect();
-  const frac = (e) => [clamp((e.clientX - cr.left) / cr.width, 0, 1), clamp((e.clientY - cr.top) / cr.height, 0, 1)];
+  // boxes are fractions of the main track's frame: the phone's screen when there is a phone frame
+  const dev = deviceLayout(S.p), W = S.p.canvas.w, H = S.p.canvas.h;
+  const sr = dev ? { left: cr.left + dev.x / W * cr.width, top: cr.top + dev.y / H * cr.height, width: dev.Ws / W * cr.width, height: dev.Hs / H * cr.height } : cr;
+  const frac = (e) => [clamp((e.clientX - sr.left) / sr.width, 0, 1), clamp((e.clientY - sr.top) / sr.height, 0, 1)];
   const finish = () => {
     const c = M.find(S.p, clipId)?.clip;
     if (c && box && box.w > 0.02 && box.h > 0.02) {
       const cv = canvasRef.current, ctx = cv.getContext("2d");
-      const level = surfaceLevel(ctx, box.x * cv.width, box.y * cv.height, box.w * cv.width, box.h * cv.height);
+      const ox = dev ? dev.x / W * cv.width : 0, oy = dev ? dev.y / H * cv.height : 0;
+      const fw = dev ? dev.Ws / W * cv.width : cv.width, fh = dev ? dev.Hs / H * cv.height : cv.height;
+      const level = surfaceLevel(ctx, ox + box.x * fw, oy + box.y * fh, box.w * fw, box.h * fh);
       commit(() => { c.clean = { strength: c.clean?.strength || 2, areas: [...(c.clean?.areas || []), { x: box.x, y: box.y, w: box.w, h: box.h, level }] }; }, null, { noTimeline: true });
     }
     setClipId(null); setBox(null);
   };
   return (
-    <div className="absolute z-20 cursor-crosshair" style={{ left: cr.left - wr.left, top: cr.top - wr.top, width: cr.width, height: cr.height }}
+    <div className="absolute z-20 cursor-crosshair" style={{ left: sr.left - wr.left, top: sr.top - wr.top, width: sr.width, height: sr.height }}
       onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); const [x, y] = frac(e); setBox({ x0: x, y0: y, x, y, w: 0, h: 0 }); }}
       onPointerMove={(e) => { if (!box) return; const [x, y] = frac(e); setBox({ ...box, x: Math.min(x, box.x0), y: Math.min(y, box.y0), w: Math.abs(x - box.x0), h: Math.abs(y - box.y0) }); }}
       onPointerUp={finish} onKeyDown={(e) => e.key === "Escape" && setClipId(null)}>

@@ -15,6 +15,7 @@ import { useBus, cn } from "../lib/hooks.js";
 import { Button, Section, Slider, Switch, Select, Segmented, ColorField, Kbd } from "./ui/index.jsx";
 import { startExport } from "./ExportDialog.jsx";
 import { smoothKey } from "../core/smooth.js";
+import { GRADIENTS } from "../core/device.js";
 import { toast } from "sonner";
 
 const pct = (v) => Math.round(v * 100) + "%";
@@ -497,6 +498,28 @@ function AudioClip({ c }) {
 }
 
 // ------------------------------------------------------------------ project (nothing selected)
+function PhoneFrame({ p }) {
+  const f = p.frame || {}, on = f.device && f.device !== "none";
+  const set = (patch) => commit(() => { p.frame = { size: 0.86, bg: "gradient", gradient: 0, color: "#1c1917", ...(p.frame || {}), ...patch }; }, "frame", { noTimeline: true });
+  return (
+    <Section title="Phone frame">
+      <Segmented value={on ? f.device : "none"} onChange={(v) => set({ device: v })} options={[["none", "None"], ["black", "Black"], ["silver", "Silver"]]} />
+      {on && <>
+        <Slider label="Size" value={f.size ?? 0.86} min={0.5} max={0.96} step={0.01} resetTo={0.86} format={pct} onChange={(v) => set({ size: v })} />
+        <Segmented label="Background" value={f.bg || "gradient"} onChange={(v) => set({ bg: v })} options={[["gradient", "Gradient"], ["color", "Colour"], ["blur", "Blur"]]} />
+        {(f.bg || "gradient") === "gradient" && <div className="mt-2 flex gap-2">
+          {GRADIENTS.map(([c0, c1], i) => (
+            <button key={i} title="Background" onClick={() => set({ gradient: i })}
+              className={cn("h-8 flex-1 rounded-md border cursor-pointer", (f.gradient || 0) === i ? "border-accent ring-2 ring-accent/40" : "border-line")}
+              style={{ background: `linear-gradient(135deg, ${c0}, ${c1})` }} />
+          ))}
+        </div>}
+        {f.bg === "color" && <ColorField label="Colour" value={f.color || "#1c1917"} onChange={(v) => set({ color: v })} />}
+      </>}
+    </Section>
+  );
+}
+
 function ProjectPanel() {
   const p = S.p;
   const set = useSetter(p, "proj.");
@@ -510,6 +533,7 @@ function ProjectPanel() {
           <Button disabled={!hasClips} onClick={A.cutRetakes}><Repeat size={14} />Cut retakes</Button>
         </div>
       </Section>
+      <PhoneFrame p={p} />
       <Section title="Fit background">
         <Segmented value={p.canvas.bg || "blur"} onChange={(v) => set("canvas.bg", v)} options={[["blur", "Blur"], ["black", "Black"], ["#ffffff", "White"]]} />
               </Section>

@@ -2,6 +2,7 @@
 // auto captions and flash/fade intro effects. Used by the live preview AND by
 // the export (as a PNG sequence), so the export matches the preview exactly.
 
+import { drawDevice } from "./device.js";
 import { kfValue } from "./kf.js";
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const easeOutBack = (x) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
@@ -450,6 +451,7 @@ function drawShape(ctx, L, c, pin, pout, v) {
 // Draws the whole layer. Returns bounding boxes by id ("captions" for captions).
 export function drawLayer(ctx, L, st, scale) {
   const boxes = {};
+  if (L.device) drawDevice(ctx, L.device.d, L.device.kind); // phone frame, under everything else
   for (const [kind, p] of st.fx) {
     ctx.save();
     if (kind === "flash") { ctx.fillStyle = `rgba(255,255,255,${(0.9 * (1 - p)).toFixed(3)})`; }

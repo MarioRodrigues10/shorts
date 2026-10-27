@@ -6,6 +6,7 @@ import { clamp } from "./util.js";
 import { durOf, endOf, mainTrack, transDur } from "./model.js";
 import { smoothParams, smoothAt, usesCropPath } from "./smooth.js";
 import { cleanBox } from "./clean.js";
+import { deviceLayout, drawDeviceBackground, screenPath } from "./device.js";
 import { kfValue, setProp, hasKf, setKf } from "./kf.js";
 import * as Media from "./media.js";
 import { drawLayer, drawGuides } from "./layer.js";
@@ -348,14 +349,33 @@ export class Player {
     ctx.setTransform(scale, 0, 0, scale, 0, 0);
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, W, H);
+    // Phone frame: the main track draws into an offscreen "screen" at the phone screen's size,
+    // which then goes into the phone on top of the background (the phone itself is in the layer).
+    const dev = deviceLayout(p);
+    let mctx = ctx, MW = W, MH = H;
+    if (dev) {
+      const sw = Math.max(2, Math.round(dev.Ws * scale)), sh = Math.max(2, Math.round(dev.Hs * scale));
+      if (!this.screen) this.screen = document.createElement("canvas");
+      if (this.screen.width !== sw || this.screen.height !== sh) { this.screen.width = sw; this.screen.height = sh; }
+      mctx = this.screen.getContext("2d");
+      mctx.setTransform(sw / dev.Ws, 0, 0, sh / dev.Hs, 0, 0);
+      mctx.fillStyle = "#000"; mctx.fillRect(0, 0, dev.Ws, dev.Hs);
+      MW = dev.Ws; MH = dev.Hs;
+    }
     if (c && !mainTrack(p).hidden) {
       const cur = this._src(c, mainEl);
-      const drawCur = () => cur && this._drawMain(ctx, p, c, cur.m, cur.src, t - c.start, W, H);
+      const drawCur = () => cur && this._drawMain(mctx, p, c, cur.m, cur.src, t - c.start, MW, MH);
       if (prev && tp < 1) {
         const pr = this._src(prev, prevEl);
-        const drawPrev = () => pr && this._drawMain(ctx, p, prev, pr.m, pr.src, t - prev.start, W, H);
-        drawTransition(ctx, c.trans.type, tp, W, H, drawPrev, drawCur);
+        const drawPrev = () => pr && this._drawMain(mctx, p, prev, pr.m, pr.src, t - prev.start, MW, MH);
+        drawTransition(mctx, c.trans.type, tp, MW, MH, drawPrev, drawCur);
       } else drawCur();
+    }
+    if (dev) {
+      drawDeviceBackground(ctx, p, dev, this.screen, this.small);
+      ctx.save(); screenPath(ctx, dev); ctx.clip(); // the screen's rounded corners
+      ctx.drawImage(this.screen, dev.x, dev.y, dev.Ws, dev.Hs);
+      ctx.restore();
     }
     const boxes = {};
     for (const tr of p.tracks) {
@@ -427,9 +447,9 @@ export class Player {
     ctx.restore();
     const cl = c.clean;
     if (cl?.areas?.length) {
-      const k = this.canvas.width / W; // canvas px per output px
+      const cw = ctx.canvas.width, ch = ctx.canvas.height, k = cw / W; // canvas px per main-frame px
       for (const a of cl.areas) {
-        try { cleanBox(ctx, { x: a.x * this.canvas.width, y: a.y * this.canvas.height, w: a.w * this.canvas.width, h: a.h * this.canvas.height }, cl.strength || 2, a.level ?? 40, k); }
+        try { cleanBox(ctx, { x: a.x * cw, y: a.y * ch, w: a.w * cw, h: a.h * ch }, cl.strength || 2, a.level ?? 40, k); }
         catch { /* canvas not readable yet */ }
       }
     }

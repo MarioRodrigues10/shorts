@@ -2,6 +2,7 @@
 import { api, emit, on } from "./util.js";
 import { relayout, timelineWords, captionGroups, find, mainTrack } from "./model.js";
 import * as Media from "./media.js";
+import { deviceLayout } from "./device.js";
 import { layerState } from "./layer.js";
 
 export const S = {
@@ -100,7 +101,8 @@ export function layer(t) {
     const cap = Object.assign({}, p.captions);
     layerCache = {
       rev: S.rev, words: ws,
-      L: { W: p.canvas.w, H: p.canvas.h, groups: captionGroups(p, ws), cap, texts, fx },
+      L: { W: p.canvas.w, H: p.canvas.h, groups: captionGroups(p, ws), cap, texts, fx,
+        device: deviceLayout(p) && { d: deviceLayout(p), kind: p.frame.device } },
     };
   }
   const { L } = layerCache;

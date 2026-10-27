@@ -1377,6 +1377,32 @@ def build_final(spec, main_file, workdir, measure=None, audio_only=False):
     # ---- video
     if not audio_only:
         base = "[0:v]"
+        fr = spec.get("frame")
+        if fr:
+            # Phone frame: background, then the main track (rendered at the screen's size) placed in
+            # the screen. The phone itself is part of the caption layer. Mirrors drawDeviceBackground().
+            hexc = lambda c: "0x" + str(c).lstrip("#")[:6]
+            if fr.get("bg") == "color":
+                graph.append(f"color=c={hexc(fr.get('color', '#1c1917'))}:s={W}x{H}:r={fps},format=yuv420p[fbg]")
+                main = "[0:v]"
+            elif fr.get("bg") == "blur":
+                graph.append(f"[0:v]split[fm][fb];[fb]scale={W // 4}:{H // 4}:force_original_aspect_ratio=increase,"
+                             f"crop={W // 4}:{H // 4},boxblur=12:2,eq=brightness=-0.12,scale={W}:{H},format=yuv420p[fbg]")
+                main = "[fm]"
+            else:
+                graph.append(f"gradients=s={W}x{H}:c0={hexc(fr.get('c0', '#dc4a22'))}:c1={hexc(fr.get('c1', '#f2b880'))}:"
+                             f"x0=0:y0=0:x1={W}:y1={H}:nb_colors=2:speed=0:r={fps},format=yuv420p[fbg]")
+                main = "[0:v]"
+            # rounded screen corners: an alpha mask computed once (geq on a single frame, then looped)
+            mw, mh, rr = int(fr["mainW"]), int(fr["mainH"]), float(fr.get("radius", 0))
+            if rr > 1:
+                dx, dy = f"max(max({rr:.2f}-X,X-({mw - 1}-{rr:.2f})),0)", f"max(max({rr:.2f}-Y,Y-({mh - 1}-{rr:.2f})),0)"
+                graph.append(f"color=c=white:s={mw}x{mh}:d=0.1:r={fps},format=gray,"
+                             f"geq=lum='255*clip({rr:.2f}-hypot({dx},{dy})+0.5,0,1)',loop=loop=-1:size=1[fmask]")
+                graph.append(f"{main}format=yuva420p[fmv];[fmv][fmask]alphamerge[fma]")
+                main = "[fma]"
+            graph.append(f"[fbg]{main}overlay=x={int(fr['x'])}:y={int(fr['y'])}:shortest=1:format=auto[framed]")
+            base = "[framed]"
         for k, (o, m, i) in enumerate(ov_specs):
             f, x, y = overlay_clip_chain(o, m, W, H, i, fps)
             graph.append(f + f"[ov{k}]")
@@ -1471,7 +1497,9 @@ def _export_render(job, pid, spec, workdir):
         raise ValueError("The timeline is empty")
     # ---- stage 1: main track as cached lossless pieces (+ transitions)
     job["message"] = "Rendering clips"
-    parts = render_main_track(spec, job, fps, spec.get("audioOpts", {}).get("repair", True))
+    fr = spec.get("frame")  # phone frame: the main track renders at the phone screen's size
+    main_spec = dict(spec, W=int(fr["mainW"]), H=int(fr["mainH"])) if fr else spec
+    parts = render_main_track(main_spec, job, fps, spec.get("audioOpts", {}).get("repair", True))
     lst = workdir / "main.txt"
     lst.write_text("".join(f"file '{Path(p).as_posix()}'\n" for p in parts))
     main_file = workdir / "main.mkv"

@@ -4,10 +4,11 @@
 import { api } from "./util.js";
 import { S, changed } from "./store.js";
 import * as M from "./model.js";
+import { mainSize } from "./device.js";
 
 const FRAMING = ["mid", "in", "out", "speed", "fit", "zoom", "zoomEnd", "x", "y", "crop", "flip", "kf", "effect"];
 const pick = (c) => FRAMING.map((k) => c[k] ?? null);
-export const smoothKey = (p, prev, c) => JSON.stringify([2, pick(prev), pick(c), p.canvas.w, p.canvas.h, p.canvas.bg]);
+export const smoothKey = (p, prev, c) => { const s = mainSize(p); return JSON.stringify([2, pick(prev), pick(c), s.w, s.h, p.canvas.bg]); };
 
 // "Fill frame" clips that never go below 100% are framed by a crop, and a smooth cut moves that
 // crop window. Mirrors uses_crop_path() in server.py.
@@ -51,7 +52,8 @@ export function alignSmoothCuts() {
         const c = clips[i], prev = clips[i - 1], key = smoothKey(p, prev, c);
         let r;
         try {
-          r = await api("/api/smooth", { W: p.canvas.w, H: p.canvas.h, bg: p.canvas.bg || "blur", fps: p.canvas.fps || 30, a: prev, b: c });
+          const s = mainSize(p);
+          r = await api("/api/smooth", { W: s.w, H: s.h, bg: p.canvas.bg || "blur", fps: p.canvas.fps || 30, a: prev, b: c });
         } catch (e) { r = { error: e.message }; }
         if (S.p !== p) return;
         if (c.trans?.type !== "smooth") continue;
