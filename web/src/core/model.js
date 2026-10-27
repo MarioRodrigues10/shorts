@@ -86,9 +86,20 @@ export function moveMainTo(p, id, S) {
 }
 
 // Close the empty space before a main clip (later clips follow).
+// Close the empty space before a main-track clip. Everything after the gap, on every row (overlays,
+// text, audio, markers), moves left by the same amount, so the edit stays in sync.
 export function closeGap(p, id) {
   const c = mainTrack(p).clips.find((x) => x.id === id);
-  if (c) { c.gap = 0; relayout(p); }
+  if (!c || !(c.gap > 0)) return;
+  relayout(p);
+  const g = c.gap, end = c.start; // the gap is [end - g, end]
+  c.gap = 0;
+  relayout(p);
+  for (const tr of p.tracks) {
+    if (tr.kind === "main") continue;
+    for (const x of tr.clips) if (x.start >= end - 1e-6) x.start = Math.max(0, x.start - g);
+  }
+  for (const mk of p.markers || []) if (mk.t >= end - 1e-6) mk.t = Math.max(0, mk.t - g);
 }
 export const mainEnd = (p) => { const m = mainTrack(p).clips; return m.length ? endOf(m[m.length - 1], "main") : 0; };
 

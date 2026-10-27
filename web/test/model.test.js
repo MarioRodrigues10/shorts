@@ -37,6 +37,20 @@ describe("main track layout", () => {
   });
 });
 
+describe("closing a gap", () => {
+  test("everything after the gap moves with the main track", () => {
+    const text = { id: "t", start: 50, dur: 2, text: "hi" }, early = { id: "e", start: 5, dur: 1, text: "early" };
+    const p = project([clip("a", 0, 10, { gap: 40 })], false, [{ id: "txt", kind: "text", clips: [text, early] }]);
+    p.markers = [{ t: 45 }];
+    expect(spans(p)).toEqual([[40, 50]]);
+    M.closeGap(p, "a");
+    expect(spans(p)).toEqual([[0, 10]]);
+    expect(text.start).toBe(10);       // was 10 s into the clip, still is
+    expect(early.start).toBe(5);       // before the gap: untouched
+    expect(p.markers[0].t).toBe(5);
+  });
+});
+
 describe("split and cut", () => {
   test("split keeps source times continuous", () => {
     const p = project([clip("a", 10, 14)]);

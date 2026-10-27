@@ -141,7 +141,7 @@ export class Timeline {
         for (const c of tr.clips) {
           if (c.start - prevEnd > 1 / FPS) {
             lane.append(el("div", { class: "tl-gap", style: { left: prevEnd * this.pps + "px", width: (c.start - prevEnd) * this.pps + "px" } },
-              (c.start - prevEnd) * this.pps > 70 ? el("button", { title: "Remove this empty space", onpointerdown: (e) => e.stopPropagation(),
+              (c.start - prevEnd) * this.pps > 70 ? el("button", { title: "Remove this empty space: everything after it, on every row, moves left with it", onpointerdown: (e) => e.stopPropagation(),
                 onclick: (e) => { e.stopPropagation(); this.h.closeGap(c.id); } }, icon("x", 10), "Close gap") : null));
           }
           prevEnd = Math.max(prevEnd, endOf(c, "main"));
