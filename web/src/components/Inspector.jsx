@@ -356,8 +356,10 @@ function Overlay({ c, m }) {
   const video = (
     <>
       <Section title="Placement">
-        <Switch label="Full screen" hint="Cover the whole frame (B-roll)" checked={c.cover} onChange={(v) => set("cover", v)} />
-        {!c.cover && <>
+        {m?.kind === "video" && <Segmented label="Phone frame" value={c.phone || "none"} onChange={(v) => set("phone", v === "none" ? null : v)}
+          options={[["none", "None"], ["black", "Black"], ["silver", "Silver"]]} />}
+        {!c.phone && <Switch label="Full screen" hint="Cover the whole frame (B-roll)" checked={c.cover} onChange={(v) => set("cover", v)} />}
+        {(!c.cover || c.phone) && <>
           <KfSlider c={c} prop="scale" label="Scale" base={c.scale ?? 0.6} setStatic={(v) => { c.scale = v; }} min={0.05} max={2} resetTo={0.7} format={pct} />
           <KfSlider c={c} prop="x" label="Position X" base={c.x ?? 0.5} setStatic={(v) => { c.x = v; }} min={0} max={1} step={0.005} resetTo={0.5} format={pct} />
           <KfSlider c={c} prop="y" label="Position Y" base={c.y ?? 0.5} setStatic={(v) => { c.y = v; }} min={0} max={1} step={0.005} resetTo={0.5} format={pct} />

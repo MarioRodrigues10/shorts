@@ -45,7 +45,7 @@ export function drawDevice(ctx, d, device) {
   const bx = x - b, by = y - b, bw = Ws + 2 * b, bh = Hs + 2 * b, br = r + b, rim = b * 0.38;
   ctx.save();
   // never paint inside the screen (the preview draws this layer over the video itself)
-  ctx.beginPath(); ctx.rect(0, 0, d.W, d.H); rrect(ctx, x, y, Ws, Hs, r); ctx.clip("evenodd");
+  ctx.beginPath(); ctx.rect(-1e5, -1e5, 2e5, 2e5); rrect(ctx, x, y, Ws, Hs, r); ctx.clip("evenodd");
   // side buttons
   ctx.fillStyle = m0;
   const btn = (side, at, len) => {
@@ -67,6 +67,35 @@ export function drawDevice(ctx, d, device) {
   ctx.fillStyle = "#000";
   const pw = Ws * 0.3, ph = Ws * 0.088;
   ctx.beginPath(); rrect(ctx, x + (Ws - pw) / 2, y + Ws * 0.032, pw, ph, ph / 2); ctx.fill();
+}
+
+// Phone as an element (an overlay clip with o.phone = "black" | "silver"): the clip's video plays in
+// the screen of a phone image. Reference geometry in image pixels; the export gets the same phone as
+// a PNG (phonePng) and places the video under it (server.py, overlay_clip_chain).
+export const PHONE = (() => {
+  const Hs = 1600, Ws = even(Hs * SCREEN_ASPECT), b = 30, m = 100; // screen, bezel, margin for shadow/buttons
+  return { Ws, Hs, b, m, W: Ws + 2 * b + 2 * m, H: Hs + 2 * b + 2 * m, sx: m + b, sy: m + b, r: Ws * 0.15 };
+})();
+
+// Phone geometry for drawDevice, for a phone image drawn at (x, y) and scale s.
+export const phoneAt = (x, y, s) => ({ x: x + PHONE.sx * s, y: y + PHONE.sy * s, Ws: PHONE.Ws * s, Hs: PHONE.Hs * s, b: PHONE.b * s, r: PHONE.r * s });
+
+// Draw a video frame into a phone image's screen: cover-cropped, rounded corners. src rect = (cx, cy, cw, ch).
+export function drawInPhone(ctx, src, cx, cy, cw, ch, d, flip) {
+  const k = Math.max(d.Ws / cw, d.Hs / ch), vw = d.Ws / k, vh = d.Hs / k;
+  ctx.save();
+  ctx.beginPath(); rrect(ctx, d.x, d.y, d.Ws, d.Hs, d.r); ctx.clip();
+  if (flip) { ctx.translate(2 * d.x + d.Ws, 0); ctx.scale(-1, 1); }
+  ctx.drawImage(src, cx + (cw - vw) / 2, cy + (ch - vh) / 2, vw, vh, d.x, d.y, d.Ws, d.Hs);
+  ctx.restore();
+}
+
+// The phone image (transparent screen) as PNG, for the export.
+export async function phonePng(kind) {
+  const c = document.createElement("canvas");
+  c.width = PHONE.W; c.height = PHONE.H;
+  drawDevice(c.getContext("2d"), phoneAt(0, 0, 1), kind);
+  return await new Promise((res) => c.toBlob(res, "image/png"));
 }
 
 // Background behind the phone (preview). `screen` is the frame drawn for the screen, for "blur".

@@ -2,6 +2,7 @@
 import { toast, snapFrame, uid, api } from "./util.js";
 import { S, commit, begin, changed, select, undo, words as tlWords } from "./store.js";
 import * as M from "./model.js";
+import { PHONE } from "./device.js";
 import * as Media from "./media.js";
 
 const now = () => S.player.time();
@@ -30,6 +31,16 @@ export function addMedia(mid, t = now(), target) {
   });
   select([clip.id]);
   return clip;
+}
+
+// A video as a phone element: on a new row at the playhead, in a phone on the right of the frame.
+export function addPhone(mid, kind = "black") {
+  const c = addMedia(mid, now(), { kind: "video", newTrack: true });
+  if (!c) return;
+  const { w: W, h: H } = S.p.canvas, wide = W > H;
+  const scale = ((wide ? 0.82 : 0.5) * H * (PHONE.W / PHONE.H)) / W; // overlay scale = width as a share of the frame
+  commit(() => { c.phone = kind; c.cover = false; c.scale = +scale.toFixed(3); c.x = wide ? 0.75 : 0.7; c.y = wide ? 0.5 : 0.55; }, null, { noTimeline: true });
+  return c;
 }
 
 export function addTrack(kind) {

@@ -1297,7 +1297,21 @@ def overlay_clip_chain(o, m, W, H, idx, fps=30):
         f += f"crop={box[2]}:{box[3]}:{box[0]}:{box[1]},"
         sw, sh = box[2], box[3]
     f += (sf + "," if sf else "")
-    if o.get("cover"):
+    ph = o.get("phone") if o.get("_phone_input") is not None else None
+    if ph:
+        # Phone element: the video cover-cropped to the screen, rounded corners, on a transparent
+        # canvas the size of the phone image, with the phone image on top. From here on the phone is
+        # the overlay's picture (sw x sh). Mirrors drawInPhone() + drawDevice() in device.js.
+        Ws, Hs, PW, PH = int(ph["Ws"]), int(ph["Hs"]), int(ph["W"]), int(ph["H"])
+        rr = float(ph["r"])
+        dx, dy = f"max(max({rr:.2f}-X,X-({Ws - 1}-{rr:.2f})),0)", f"max(max({rr:.2f}-Y,Y-({Hs - 1}-{rr:.2f})),0)"
+        n = idx
+        f += (f"scale={Ws}:{Hs}:force_original_aspect_ratio=increase:flags={SCALE_FLAGS},crop={Ws}:{Hs},format=yuva444p[pv{n}];"
+              f"color=c=white:s={Ws}x{Hs}:d=0.1:r={fps},format=gray,geq=lum='255*clip({rr:.2f}-hypot({dx},{dy})+0.5,0,1)',"
+              f"loop=loop=-1:size=1[pm{n}];[pv{n}][pm{n}]alphamerge,pad={PW}:{PH}:{int(ph['sx'])}:{int(ph['sy'])}:color=black@0[pp{n}];"
+              f"[{o['_phone_input']}:v]format=yuva444p[pi{n}];[pp{n}][pi{n}]overlay=0:0:shortest=1:format=auto,")
+        sw, sh = PW, PH
+    if o.get("cover") and not ph:
         s = max(W / sw, H / sh)
         f += f"scale={even(sw * s)}:{even(sh * s)}:flags={SCALE_FLAGS},format=rgba"
     else:
@@ -1355,6 +1369,11 @@ def build_final(spec, main_file, workdir, measure=None, audio_only=False):
             inputs += D + ["-ss", f"{o['in']:.4f}", "-t", f"{src_len + 0.2:.4f}", "-i", m["path"]]
         ov_specs.append((o, m, idx))
         idx += 1
+        ph = o.get("phone")
+        if ph and m["kind"] == "video" and (workdir / ph["file"]).exists():  # phone image from the browser
+            inputs += ["-loop", "1", "-framerate", str(fps), "-t", f"{o['dur'] + 0.2:.4f}", "-i", str(workdir / ph["file"])]
+            o["_phone_input"] = idx
+            idx += 1
     aud_specs = []
     for a in spec.get("audio", []):
         m = load_meta(a["mid"])

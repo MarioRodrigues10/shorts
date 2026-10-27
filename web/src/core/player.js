@@ -6,7 +6,7 @@ import { clamp } from "./util.js";
 import { durOf, endOf, mainTrack, transDur } from "./model.js";
 import { smoothParams, smoothAt, usesCropPath } from "./smooth.js";
 import { cleanBox } from "./clean.js";
-import { deviceLayout, drawDeviceBackground, screenPath } from "./device.js";
+import { deviceLayout, drawDeviceBackground, screenPath, PHONE, phoneAt, drawInPhone, drawDevice } from "./device.js";
 import { kfValue, setProp, hasKf, setKf } from "./kf.js";
 import * as Media from "./media.js";
 import { drawLayer, drawGuides } from "./layer.js";
@@ -388,7 +388,7 @@ export class Player {
         const src = m.kind === "image" ? this._image(o.mid) : this.pool.get("o" + o.id)?.el;
         const v = overlayValues(o, lt);
         const cr = cropRect(o, m.width || 1, m.height || 1);
-        const r = overlayRect(v, { width: cr.w, height: cr.h }, W, H);
+        const r = overlayRect(v, o.phone ? { width: PHONE.W, height: PHONE.H } : { width: cr.w, height: cr.h }, W, H);
         if (src && ready(src)) {
           const kx = (src.videoWidth || src.naturalWidth) / (m.width || 1), ky = (src.videoHeight || src.naturalHeight) / (m.height || 1);
           ctx.save();
@@ -397,7 +397,12 @@ export class Player {
           ctx.translate(r.x + r.w / 2, r.y + r.h / 2);
           if (v.rotate) ctx.rotate(v.rotate * Math.PI / 180);
           if (o.flip) ctx.scale(-1, 1);
-          ctx.drawImage(src, cr.x * kx, cr.y * ky, cr.w * kx, cr.h * ky, -r.w / 2, -r.h / 2, r.w, r.h);
+          if (o.phone) { // phone element: video in the screen, phone drawn around it (flip mirrors only the video)
+            if (o.flip) ctx.scale(-1, 1);
+            const d = phoneAt(-r.w / 2, -r.h / 2, r.w / PHONE.W);
+            drawInPhone(ctx, src, cr.x * kx, cr.y * ky, cr.w * kx, cr.h * ky, d, o.flip);
+            drawDevice(ctx, d, o.phone);
+          } else ctx.drawImage(src, cr.x * kx, cr.y * ky, cr.w * kx, cr.h * ky, -r.w / 2, -r.h / 2, r.w, r.h);
           ctx.restore();
         }
         boxes[o.id] = r;

@@ -10,7 +10,9 @@ import { DownloadSimple } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { celebrate } from "../lib/mascot.js";
 import { smoothParams, alignSmoothCuts } from "../core/smooth.js";
-import { deviceLayout, GRADIENTS } from "../core/device.js";
+import { deviceLayout, GRADIENTS, PHONE, phonePng } from "../core/device.js";
+
+const PHONE_FILE = { black: 900000, silver: 900001 }; // phone images ride along with the caption frames
 
 export function startExport() { emit("export"); }
 
@@ -38,7 +40,8 @@ function buildSpec(opts) {
   for (const tr of p.tracks) {
     if (tr.kind === "video" && !tr.hidden) for (const c of tr.clips) {
       if (c.start >= total) continue;
-      overlays.push({ ...c, dur: Math.min(M.durOf(c, "video"), total - c.start), mute: c.mute || !!tr.muted });
+      overlays.push({ ...c, dur: Math.min(M.durOf(c, "video"), total - c.start), mute: c.mute || !!tr.muted,
+        phone: c.phone ? { kind: c.phone, file: `f${PHONE_FILE[c.phone] ?? 900000}.png`, ...PHONE } : null });
     }
     if (tr.kind === "audio" && !tr.muted) for (const c of tr.clips) {
       if (c.start >= total || c.mute) continue;
@@ -86,6 +89,9 @@ export default function ExportDialog() {
       c.width = spec.W; c.height = spec.H;
       const ctx = c.getContext("2d");
       const keyToFile = new Map(), overlay = [], uploads = [];
+      for (const kind of new Set(spec.overlays.filter((o) => o.phone).map((o) => o.phone.kind))) {
+        uploads.push(fetch(`/api/export/${job}/frame?i=${PHONE_FILE[kind]}`, { method: "POST", body: await phonePng(kind) }));
+      }
       let prevKey = null, nextFile = 0;
       for (let f = 0; f < N; f++) {
         const s = layer(f / fps).st;
