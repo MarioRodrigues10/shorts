@@ -932,35 +932,52 @@ def smooth_filter(sm, W, H, off):
             f"[pbg][ps]overlay=x='{X}':y='{Y}':eval=frame:format=yuv444")
 
 
-CLEAN_STRENGTH = {1: (1, 2), 2: (2, 3), 3: (3, 5)}  # min/max passes, median radius at 1080p (clean.js)
+# strength -> (min/max passes, median radius, haze kept, grain kept), at 1080p. Mirrors clean.js.
+CLEAN_STRENGTH = {1: (1, 2, 0.6, 0.8), 2: (2, 3, 0.35, 0.6), 3: (3, 4, 0.15, 0.4)}
 CLEAN_FEATHER = 0.04
 
 
 def clean_filter(cl, W, H):
-    """Clean surface: in each box, lint/dust/crumbs are pulled to the surface level (brightness only,
-    edges fade in). Appended to a clip's finished frame. Mirrors cleanBox() in clean.js."""
-    passes, rad = CLEAN_STRENGTH.get(int(cl.get("strength", 2)), CLEAN_STRENGTH[2])
+    """Clean surface, per box drawn on the frame. Only pixels that look like the surface (neutral
+    colour, near its brightness, away from objects' edges) are touched, and only their brightness:
+      lint/dust: min (max on light surfaces) filter + median
+      dust haze: mid-size variation flattened toward the large-scale lighting
+      texture:   a fine, clamped grain from the original is put back, so fabric still looks real
+    Box edges fade in. Mirrors cleanBox() in clean.js."""
+    passes, rad, flat, grain = CLEAN_STRENGTH.get(int(cl.get("strength", 2)), CLEAN_STRENGTH[2])
     k = min(W, H) / 1080
     passes, rad = max(1, round(passes * k)), max(1, round(rad * k))
+    sig, edge = max(2.0, 25 * k), max(1, round(5 * k))
     parts, chain = [], "[cin]"
     for i, a in enumerate(cl.get("areas") or []):
         x, y = int(float(a["x"]) * W) // 2 * 2, int(float(a["y"]) * H) // 2 * 2
-        w, h = max(4, int(float(a["w"]) * W) // 2 * 2), max(4, int(float(a["h"]) * H) // 2 * 2)
+        w, h = max(8, int(float(a["w"]) * W) // 2 * 2), max(8, int(float(a["h"]) * H) // 2 * 2)
         w, h = min(w, W - x), min(h, H - y)
-        if w < 4 or h < 4:
+        if w < 8 or h < 8:
             continue
         level = float(a.get("level", 40))
         dark = level < 128
-        L = 16 + ((level + 4) if dark else (level - 4)) * 219 / 255  # limited-range luma
+        LV = 16 + level * 219 / 255                       # surface level, limited-range luma
+        L = 16 + ((level + 4) if dark else (level - 4)) * 219 / 255
         mm = ",".join([("erosion" if dark else "dilation") + "=threshold1=0:threshold2=0:threshold3=0"] * passes)
-        lut = (f"if(gt(val,{L:.1f}),{L:.1f}+(val-{L:.1f})*0.35,val)" if dark else  # quoted: plain commas
-               f"if(lt(val,{L:.1f}),{L:.1f}+(val-{L:.1f})*0.35,val)")
+        keep = "c1_expr=A:c2_expr=A:c3_expr=A"
+        comp = (f"if(gt(v,{L:.1f}),{L:.1f}+(v-{L:.1f})*0.35,v)" if dark else f"if(lt(v,{L:.1f}),{L:.1f}+(v-{L:.1f})*0.35,v)")
+        weight = (f"255*clip(1-(abs(lum(X,Y)-{LV:.1f})-15)/9,0,1)"
+                  f"*clip(1-(max(abs(cb(X,Y)-128),abs(cr(X,Y)-128))-8)/6,0,1)")
         fe = max(1.0, min(w, h) * CLEAN_FEATHER)
-        alpha = f"255*clip(min(min(X,W-1-X),min(Y,H-1-Y))/{fe:.2f},0,1)"
-        parts.append(f"{chain}split[cm{i}][cs{i}];[cs{i}]crop={w}:{h}:{x}:{y},format=yuva444p,{mm},median=radius={rad}:planes=1,"
-                     f"lutyuv=y='{lut}',geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='{alpha}'[cp{i}];"
-                     f"[cm{i}][cp{i}]overlay={x}:{y}:format=yuv444[co{i}]")
-        chain = f"[co{i}]"
+        n = f"{i}"
+        parts.append(
+            f"{chain}split[cm{n}][cs{n}];[cs{n}]crop={w}:{h}:{x}:{y},format=yuva444p,split=5[o{n}][e{n}][g{n}][gb{n}][w{n}];"
+            f"[e{n}]{mm},median=radius={rad}:planes=1,split[m{n}][ms{n}];[ms{n}]gblur=sigma={sig:.1f}:planes=1[s{n}];"
+            f"[m{n}][s{n}]blend=c0_expr='B+(A-B)*{flat}':{keep}[base{n}];"
+            f"[gb{n}]gblur=sigma=1.2:planes=1[gbl{n}];[g{n}][gbl{n}]blend=c0_expr='128+clip(A-B,-3,3)*{grain}':{keep}[gr{n}];"
+            f"[base{n}][gr{n}]blend=c0_expr='st(0,A+B-128);{comp.replace('v', 'ld(0)').replace('ld(0)al', 'val')}':{keep}[cl{n}];"
+            f"[w{n}]gblur=sigma=2,geq=lum='{weight}':cb=128:cr=128:a=255,"
+            f"{','.join(['erosion'] * edge)},gblur=sigma={max(1.0, 3 * k):.1f}[wm{n}];"
+            f"[o{n}][cl{n}][wm{n}]maskedmerge=planes=1,"
+            f"geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='255*clip(min(min(X,W-1-X),min(Y,H-1-Y))/{fe:.2f},0,1)'[cp{n}];"
+            f"[cm{n}][cp{n}]overlay={x}:{y}:format=yuv444[co{n}]")
+        chain = f"[co{n}]"
     if not parts:
         return None
     return "split=1[cin];" + ";".join(parts), chain
