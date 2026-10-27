@@ -219,9 +219,9 @@ export function Menu({ trigger, items, align = "end" }) {
   );
 }
 
-export function Popover({ trigger, children, side = "bottom", align = "center" }) {
+export function Popover({ trigger, children, side = "bottom", align = "center", open, onOpenChange }) {
   return (
-    <RPopover.Root>
+    <RPopover.Root open={open} onOpenChange={onOpenChange}>
       <RPopover.Trigger asChild>{trigger}</RPopover.Trigger>
       <RPopover.Portal>
         <RPopover.Content side={side} align={align} sideOffset={8} className="z-[90] rounded-lg border border-line-strong bg-surface-2 p-3 shadow-lg outline-none">

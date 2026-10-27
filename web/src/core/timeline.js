@@ -192,6 +192,7 @@ export class Timeline {
       if (c.zoomEnd != null) badges.push("Slow zoom");
       if (c.adj && Object.values(c.adj).some((v) => v)) badges.push("Adjusted");
       if (c.mute) badges.push("Muted");
+      if (c.phone) badges.push("Phone");
       if (kind === "audio" && c.duck) badges.push("Ducking");
       const name = m ? m.name : "Missing media";
       const wpx = d * this.pps;

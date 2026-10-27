@@ -39,7 +39,7 @@ export function addPhone(mid, kind = "black") {
   if (!c) return;
   const { w: W, h: H } = S.p.canvas, wide = W > H;
   const scale = ((wide ? 0.82 : 0.5) * H * (PHONE.W / PHONE.H)) / W; // overlay scale = width as a share of the frame
-  commit(() => { c.phone = kind; c.cover = false; c.scale = +scale.toFixed(3); c.x = wide ? 0.75 : 0.7; c.y = wide ? 0.5 : 0.55; }, null, { noTimeline: true });
+  commit(() => { c.phone = kind; c.cover = false; c.scale = +scale.toFixed(3); c.x = wide ? 0.75 : 0.7; c.y = wide ? 0.5 : 0.55; }); // timeline too: the clip gets a "Phone" badge
   return c;
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as RTabs from "@radix-ui/react-tabs";
-import { FilmStrip, Stack, TextT, MusicNotes, Trash, Copy, LinkBreak, ClosedCaptioning, Waveform, Repeat, FilmSlate } from "@phosphor-icons/react";
+import { FilmStrip, Stack, TextT, MusicNotes, DeviceMobile, Trash, Copy, LinkBreak, ClosedCaptioning, Waveform, Repeat, FilmSlate } from "@phosphor-icons/react";
 import { S, commit } from "../core/store.js";
 import * as M from "../core/model.js";
 import * as Media from "../core/media.js";
@@ -15,7 +15,7 @@ import { useBus, cn } from "../lib/hooks.js";
 import { Button, Section, Slider, Switch, Select, Segmented, ColorField, Kbd } from "./ui/index.jsx";
 import { startExport } from "./ExportDialog.jsx";
 import { smoothKey } from "../core/smooth.js";
-import { GRADIENTS } from "../core/device.js";
+import { DeviceTiles, GradientSwatches } from "./PhoneUI.jsx";
 import { toast } from "sonner";
 
 const pct = (v) => Math.round(v * 100) + "%";
@@ -103,7 +103,7 @@ export default function Inspector({ width = 300 }) {
     else {
       const kind = f.track.kind;
       const m = f.clip.mid ? Media.meta(f.clip.mid) : null;
-      Icon = { main: FilmStrip, video: Stack, text: TextT, audio: MusicNotes }[kind];
+      Icon = f.clip.phone ? DeviceMobile : { main: FilmStrip, video: Stack, text: TextT, audio: MusicNotes }[kind];
       title = kind === "text" ? "Text" : m?.name || "Clip";
       const Comp = { main: MainClip, video: Overlay, text: TextClip, audio: AudioClip }[kind];
       body = <Comp key={f.clip.id} c={f.clip} m={m} />;
@@ -355,9 +355,10 @@ function Overlay({ c, m }) {
   const set = useSetter(c, "ov." + c.id + ".");
   const video = (
     <>
+      {m?.kind === "video" && <Section title="Phone">
+        <DeviceTiles value={c.phone || "none"} onChange={(v) => set("phone", v === "none" ? null : v, true)} />
+      </Section>}
       <Section title="Placement">
-        {m?.kind === "video" && <Segmented label="Phone frame" value={c.phone || "none"} onChange={(v) => set("phone", v === "none" ? null : v)}
-          options={[["none", "None"], ["black", "Black"], ["silver", "Silver"]]} />}
         {!c.phone && <Switch label="Full screen" hint="Cover the whole frame (B-roll)" checked={c.cover} onChange={(v) => set("cover", v)} />}
         {(!c.cover || c.phone) && <>
           <KfSlider c={c} prop="scale" label="Scale" base={c.scale ?? 0.6} setStatic={(v) => { c.scale = v; }} min={0.05} max={2} resetTo={0.7} format={pct} />
@@ -505,17 +506,12 @@ function PhoneFrame({ p }) {
   const set = (patch) => commit(() => { p.frame = { size: 0.86, bg: "gradient", gradient: 0, color: "#1c1917", ...(p.frame || {}), ...patch }; }, "frame", { noTimeline: true });
   return (
     <Section title="Phone frame">
-      <Segmented value={on ? f.device : "none"} onChange={(v) => set({ device: v })} options={[["none", "None"], ["black", "Black"], ["silver", "Silver"]]} />
+      {!on && <p className="text-[11px] text-subtle">Show the whole video inside a phone.</p>}
+      <DeviceTiles value={on ? f.device : "none"} onChange={(v) => set({ device: v })} />
       {on && <>
         <Slider label="Size" value={f.size ?? 0.86} min={0.5} max={0.96} step={0.01} resetTo={0.86} format={pct} onChange={(v) => set({ size: v })} />
         <Segmented label="Background" value={f.bg || "gradient"} onChange={(v) => set({ bg: v })} options={[["gradient", "Gradient"], ["color", "Colour"], ["blur", "Blur"]]} />
-        {(f.bg || "gradient") === "gradient" && <div className="mt-2 flex gap-2">
-          {GRADIENTS.map(([c0, c1], i) => (
-            <button key={i} title="Background" onClick={() => set({ gradient: i })}
-              className={cn("h-8 flex-1 rounded-md border cursor-pointer", (f.gradient || 0) === i ? "border-accent ring-2 ring-accent/40" : "border-line")}
-              style={{ background: `linear-gradient(135deg, ${c0}, ${c1})` }} />
-          ))}
-        </div>}
+        {(f.bg || "gradient") === "gradient" && <GradientSwatches value={f.gradient} onChange={(i) => set({ gradient: i })} />}
         {f.bg === "color" && <ColorField label="Colour" value={f.color || "#1c1917"} onChange={(v) => set({ color: v })} />}
       </>}
     </Section>
