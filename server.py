@@ -1283,13 +1283,13 @@ def overlay_kf(o, prop, base):
     return kf_expr(k, base, "T") if k else None
 
 
-def overlay_clip_chain(o, m, W, H, idx, fps=30):
-    """Filter for one overlay (video/image). Keyframed x/y/scale/opacity/rotate become per-frame
-    expressions in local time T. Returns (chain, x_expr, y_expr). Mirrors overlayValues() in player.js."""
+def overlay_source_chain(o, m, W, H, idx, fps=30):
+    """The heavy, constant-size part of an overlay: decode, crop, colour, phone, and scale to its final
+    size (or, with scale keyframes, to the largest size it reaches). Local time from 0, trimmed to the
+    clip. Rendered on its own before the final pass (prerender_overlays), one clip at a time."""
     speed = float(o.get("speed", 1.0))
     dur = o["dur"]
     sw, sh = max(1, m["width"]), max(1, m["height"])
-    start = float(o["start"])
     sf = source_filters(o, m)
     f = f"[{idx}:v]setpts=(PTS-STARTPTS)/{speed},fps={fps},"
     box = crop_box(o, sw, sh)
@@ -1313,16 +1313,26 @@ def overlay_clip_chain(o, m, W, H, idx, fps=30):
         sw, sh = PW, PH
     if o.get("cover") and not ph:
         s = max(W / sw, H / sh)
-        f += f"scale={even(sw * s)}:{even(sh * s)}:flags={SCALE_FLAGS},format=rgba"
     else:
-        ks = overlay_kf(o, "scale", float(o.get("scale", 0.6)))
-        if ks:
-            k = ks.replace("T", "t")
-            f += (f"scale=w='2*ceil({sw}*({W}/{sw})*{k}/2)':h='2*ceil({sh}*({W}/{sw})*{k}/2)':eval=frame:"
-                  f"flags={SCALE_FLAGS},format=rgba")
-        else:
-            s = float(o.get("scale", 0.6)) * W / sw
-            f += f"scale={even(sw * s)}:{even(sh * s)}:flags={SCALE_FLAGS},format=rgba"
+        kf = (o.get("kf") or {}).get("scale")
+        s = max([float(o.get("scale", 0.6))] + [float(k["v"]) for k in (kf or [])]) * W / sw
+    f += f"scale={even(sw * s)}:{even(sh * s)}:flags={SCALE_FLAGS},format=rgba,trim=0:{dur:.4f},setpts=PTS-STARTPTS"
+    return f, (sw, sh)
+
+
+def overlay_clip_chain(o, m, W, H, idx, fps=30):
+    """The rest of an overlay, on its pre-rendered source (input idx): scale keyframes, opacity,
+    rotation, fades, then shifted to its start. Keyframed x/y/scale/opacity/rotate become per-frame
+    expressions in local time T. Returns (chain, x_expr, y_expr). Mirrors overlayValues() in player.js."""
+    dur = o["dur"]
+    sw, sh = o["_src_size"]
+    start = float(o["start"])
+    f = f"[{idx}:v]setpts=PTS-STARTPTS,format=rgba"
+    ks = None if o.get("cover") and not o.get("phone") else overlay_kf(o, "scale", float(o.get("scale", 0.6)))
+    if ks:
+        k = ks.replace("T", "t")
+        f += (f",scale=w='2*ceil({sw}*({W}/{sw})*{k}/2)':h='2*ceil({sh}*({W}/{sw})*{k}/2)':eval=frame:"
+              f"flags={SCALE_FLAGS},format=rgba")
     kop = overlay_kf(o, "opacity", float(o.get("opacity", 1)))
     if kop:
         f += f",geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*clip({kop},0,1)'"
@@ -1340,7 +1350,7 @@ def overlay_clip_chain(o, m, W, H, idx, fps=30):
     if fo > 0:
         f += f",fade=t=out:st={max(0, dur - fo):.3f}:d={fo:.3f}:alpha=1"
     f += f",trim=0:{dur:.4f},setpts=PTS+{start:.4f}/TB"
-    if o.get("cover"):
+    if o.get("cover") and not o.get("phone"):
         return f, "(W-w)/2", "(H-h)/2"
     lt = f"(t-{start:.4f})"
     kx = overlay_kf(o, "x", float(o.get("x", 0.5)))
@@ -1348,6 +1358,35 @@ def overlay_clip_chain(o, m, W, H, idx, fps=30):
     xe = f"({kx.replace('T', lt)})*{W}-w/2" if kx else f"{float(o.get('x', 0.5)) * W:.2f}-w/2"
     ye = f"({ky.replace('T', lt)})*{H}-h/2" if ky else f"{float(o.get('y', 0.5)) * H:.2f}-h/2"
     return f, xe, ye
+
+
+def prerender_overlays(spec, workdir, job=None):
+    """Render each overlay's heavy part to a small lossless file (FFV1, with alpha), one at a time,
+    so the final pass doesn't decode every overlay's full-size source at once (23 overlays with
+    phones peaked at ~3 GB and stalled)."""
+    W, H, fps = spec["W"], spec["H"], int(spec.get("fps", 30))
+    ovs = spec.get("overlays", [])
+    for k, o in enumerate(ovs):
+        m = load_meta(o["mid"])
+        if not m:
+            continue
+        if job is not None:
+            job["message"] = f"Preparing overlay {k + 1}/{len(ovs)}"
+        speed = float(o.get("speed", 1.0))
+        if m["kind"] == "image":
+            ins = ["-loop", "1", "-framerate", str(fps), "-t", f"{o['dur'] + 0.2:.4f}", "-i", m["path"]]
+        else:
+            ins = ["-ss", f"{o['in']:.4f}", "-t", f"{o['dur'] * speed + 0.2:.4f}", "-an", "-i", m["path"]]
+        ph = o.get("phone")
+        o.pop("_phone_input", None)
+        if ph and m["kind"] == "video" and (workdir / ph["file"]).exists():
+            ins += ["-loop", "1", "-framerate", str(fps), "-t", f"{o['dur'] + 0.2:.4f}", "-i", str(workdir / ph["file"])]
+            o["_phone_input"] = 1
+        chain, size = overlay_source_chain(o, m, W, H, 0, fps)
+        out = workdir / f"ov{k}.mkv"
+        run_ffmpeg(["ffmpeg", "-y", "-threads", "2"] + ins + ["-filter_complex", chain + "[o]", "-map", "[o]",
+                    "-c:v", "ffv1", "-pix_fmt", "bgra", str(out)], job, None)
+        o["_pre"], o["_src_size"] = str(out), size
 
 
 def build_final(spec, main_file, workdir, measure=None, audio_only=False):
@@ -1362,17 +1401,16 @@ def build_final(spec, main_file, workdir, measure=None, audio_only=False):
     ov_specs = []
     for o in spec.get("overlays", []):
         m = load_meta(o["mid"])
-        if m["kind"] == "image":
-            inputs += D + ["-loop", "1", "-framerate", str(fps), "-t", f"{o['dur'] + 0.2:.4f}", "-i", m["path"]]
-        else:
-            src_len = o["dur"] * float(o.get("speed", 1.0))
-            inputs += D + ["-ss", f"{o['in']:.4f}", "-t", f"{src_len + 0.2:.4f}", "-i", m["path"]]
-        ov_specs.append((o, m, idx))
-        idx += 1
-        ph = o.get("phone")
-        if ph and m["kind"] == "video" and (workdir / ph["file"]).exists():  # phone image from the browser
-            inputs += ["-loop", "1", "-framerate", str(fps), "-t", f"{o['dur'] + 0.2:.4f}", "-i", str(workdir / ph["file"])]
-            o["_phone_input"] = idx
+        if not m or not o.get("_pre"):
+            continue
+        if not audio_only:  # the pre-rendered picture (prerender_overlays): small, already framed
+            inputs += D + ["-i", o["_pre"]]
+            ov_specs.append((o, m, idx))
+            idx += 1
+        if m["kind"] == "video" and m.get("has_audio") and not o.get("mute") and float(o.get("volume", 1)) > 0:
+            src_len = o["dur"] * float(o.get("speed", 1.0))  # its sound, read without decoding the video
+            inputs += ["-vn", "-ss", f"{o['in']:.4f}", "-t", f"{src_len + 0.2:.4f}", "-i", m["path"]]
+            o["_aidx"] = idx
             idx += 1
     aud_specs = []
     for a in spec.get("audio", []):
@@ -1433,10 +1471,11 @@ def build_final(spec, main_file, workdir, measure=None, audio_only=False):
 
     # ---- audio
     voices = [f"[{voice_idx}:a]"]
-    for k, (o, m, i) in enumerate(ov_specs):
-        if m["kind"] == "video" and m.get("has_audio") and not o.get("mute") and float(o.get("volume", 1)) > 0:
+    for k, o in enumerate(spec.get("overlays", [])):
+        if o.get("_aidx") is not None:
+            m = load_meta(o["mid"])
             speed = float(o.get("speed", 1.0))
-            ch = (f"[{i}:a]asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo"
+            ch = (f"[{o['_aidx']}:a]asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo"
                   + ("," + DECLIP if repair and m.get("clipped") else "")
                   + ("," + atempo_chain(speed) if speed != 1 else "")
                   + f",volume={float(o.get('volume', 1))},atrim=0:{o['dur']:.4f},"
@@ -1523,6 +1562,9 @@ def _export_render(job, pid, spec, workdir):
     lst.write_text("".join(f"file '{Path(p).as_posix()}'\n" for p in parts))
     main_file = workdir / "main.mkv"
     run_ffmpeg(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(main_file)])
+
+    # ---- overlays: heavy part rendered one at a time (keeps the final pass small)
+    prerender_overlays(spec, workdir, job)
 
     # ---- text/caption layer (PNG sequence from the browser)
     with (workdir / "overlay.txt").open("w") as f:
