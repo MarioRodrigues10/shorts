@@ -13,6 +13,7 @@ import Inspector from "./Inspector.jsx";
 import TimelineView from "./TimelineView.jsx";
 import ExportDialog, { startExport } from "./ExportDialog.jsx";
 import Shortcuts, { openShortcuts } from "./Shortcuts.jsx";
+import { alignSmoothCuts } from "../core/smooth.js";
 import { CircleNotch } from "@phosphor-icons/react";
 import { Resizer } from "./ui/index.jsx";
 import { usePanelSize } from "../lib/theme.js";
@@ -32,6 +33,14 @@ export default function Editor({ id }) {
   const [error, setError] = useState(null);
   const [wide, setWide] = useState(false); // "Bigger preview": side panels hidden
   useEffect(() => on("toggle-panels", () => setWide((x) => !x)), []);
+  useEffect(() => { // smooth cuts follow the edit: re-measure shortly after changes
+    if (!ready) return;
+    let timer = 0;
+    const kick = () => { clearTimeout(timer); timer = setTimeout(alignSmoothCuts, 700); };
+    kick();
+    const off = on("changed", kick);
+    return () => { clearTimeout(timer); off(); };
+  }, [ready]);
   useEffect(() => { S.player?.resize(); }, [wide]);
 
   useEffect(() => {

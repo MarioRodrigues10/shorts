@@ -19,13 +19,13 @@ export const endOf = (c, kind) => c.start + durOf(c, kind);
 
 // Transition into main clip i (overlaps the previous clip). Limited to half of either clip.
 export const TRANSITIONS = [
-  ["none", "None"], ["fade", "Dissolve"], ["fadeblack", "Dip to black"], ["fadewhite", "Flash white"],
+  ["none", "None"], ["smooth", "Smooth cut"], ["fade", "Dissolve"], ["fadeblack", "Dip to black"], ["fadewhite", "Flash white"],
   ["slideleft", "Slide left"], ["slideright", "Slide right"], ["slideup", "Slide up"], ["slidedown", "Slide down"],
   ["wipeleft", "Wipe left"], ["wiperight", "Wipe right"], ["zoomin", "Zoom"], ["circleopen", "Circle"],
 ];
 export function transDur(clips, i) {
   const c = clips[i], prev = clips[i - 1];
-  if (!prev || !c.trans || !c.trans.type || c.trans.type === "none") return 0;
+  if (!prev || !c.trans || !c.trans.type || c.trans.type === "none" || c.trans.type === "smooth") return 0; // smooth cuts don't overlap
   if ((c.gap || 0) > 1e-6) return 0; // transitions only join clips that touch
   const d = Math.min(c.trans.dur || 0.5, durOf(prev, "main") * 0.5, durOf(c, "main") * 0.5);
   return Math.max(0, Math.round(d * FPS) / FPS);

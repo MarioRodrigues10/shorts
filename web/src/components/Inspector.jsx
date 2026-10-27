@@ -14,6 +14,7 @@ import * as RSlider from "@radix-ui/react-slider";
 import { useBus, cn } from "../lib/hooks.js";
 import { Button, Section, Slider, Switch, Select, Segmented, ColorField, Kbd } from "./ui/index.jsx";
 import { startExport } from "./ExportDialog.jsx";
+import { smoothKey } from "../core/smooth.js";
 import { toast } from "sonner";
 
 const pct = (v) => Math.round(v * 100) + "%";
@@ -281,6 +282,13 @@ function SmartTools({ c, m }) {
   );
 }
 
+function SmoothStatus({ c, prev }) {
+  const al = c.trans.align, fresh = al && al.key === smoothKey(S.p, prev, c);
+  const msg = !fresh ? "Lining up your face…" : al.error ? `Plays as a normal cut: ${al.error}.`
+    : al.shift < 1 ? "Already lined up: nothing to correct." : `Face lined up (moved ${Math.round(al.shift)} px), then glides back.`;
+  return <p className={cn("mt-2 text-xs", fresh && al.error ? "text-warn" : "text-subtle")}>{msg}</p>;
+}
+
 function TransitionTab({ c }) {
   const main = M.mainTrack(S.p).clips;
   const i = main.findIndex((x) => x.id === c.id);
@@ -296,8 +304,9 @@ function TransitionTab({ c }) {
                 type === k ? "border-accent bg-accent-soft text-fg" : "border-line bg-surface-2 text-muted hover:text-fg hover:border-line-strong")}>{l}</button>
           ))}
         </div>
-        {type !== "none" && <Slider label="Duration" value={dur} min={0.1} max={1.5} step={0.05} resetTo={0.5} format={sec}
-          onChange={(v) => commit(() => { c.trans = { type, dur: v }; }, `trans.${c.id}`)} />}
+        {type === "smooth" && <SmoothStatus c={c} prev={main[i - 1]} />}
+        {type !== "none" && <Slider label={type === "smooth" ? "Glide back over" : "Duration"} value={dur} min={0.1} max={1.5} step={0.05} resetTo={0.5} format={sec}
+          onChange={(v) => commit(() => { c.trans = { ...c.trans, type, dur: v }; }, `trans.${c.id}`)} />}
       </Section>
       <Section><Button className="w-full justify-center" onClick={() => A.applyTransitionToAll(type, dur)}>Use on every cut</Button></Section>
     </>

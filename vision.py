@@ -3,6 +3,8 @@
 
   vision.py faces    SRC START END OUT.json
       Face centre samples (5 per second) over the source range, for auto-reframe.
+  vision.py align    A.png B.png OUT.json
+      Face position and size in two stills (the frames either side of a cut), for smooth cuts.
   vision.py removebg SRC START END OUT.mp4 --bg blur|#rrggbb
       Replace the background behind the person (selfie segmentation) and re-encode
       the range (x264 CRF 14 + the original audio).
@@ -76,6 +78,70 @@ def cmd_faces(a):
     say(progress=1.0)
 
 
+def face_points(det, path):
+    """Largest face in an image: centre of eyes, nose and mouth, and its size (eye distance and box
+    height combined), in pixels. None if no face."""
+    img = cv2.cvtColor(cv2.imread(path), cv2.COLOR_BGR2RGB)
+    h, w = img.shape[:2]
+    r = det.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(img)))
+    if not r.detections:
+        return None
+    d = max(r.detections, key=lambda d: d.bounding_box.width * d.bounding_box.height)
+    kp = [(p.x * w, p.y * h) for p in d.keypoints[:4]]  # right eye, left eye, nose tip, mouth
+    cx, cy = sum(p[0] for p in kp) / 4, sum(p[1] for p in kp) / 4
+    eyes = ((kp[0][0] - kp[1][0]) ** 2 + (kp[0][1] - kp[1][1]) ** 2) ** 0.5
+    size = (eyes * 2.2 + d.bounding_box.height) / 2
+    return {"x": round(cx, 2), "y": round(cy, 2), "size": round(size, 2), "w": w, "h": h,
+            "score": round(d.categories[0].score, 3)}
+
+
+def align_faces(det, path_a, path_b):
+    """Similarity transform (k, tx, ty) that maps frame B onto frame A around the face: a pixel at p
+    in B belongs at k*p + t in A. Starts from the face landmarks, then refines on the pixels of the
+    head and shoulders (ECC), which is far steadier than landmarks alone. None when there is no
+    face or the two frames don't match (different shot, face turned away)."""
+    fa, fb = face_points(det, path_a), face_points(det, path_b)
+    if not fa or not fb:
+        return None
+    ga = cv2.cvtColor(cv2.imread(path_a), cv2.COLOR_BGR2GRAY)
+    gb = cv2.cvtColor(cv2.imread(path_b), cv2.COLOR_BGR2GRAY)
+    h, w = ga.shape
+    q = 360 / max(fa["size"], 1)  # work at a scale where the face is ~360 px
+    q = min(q, 1.0)
+    ga = cv2.resize(ga, None, fx=q, fy=q, interpolation=cv2.INTER_AREA).astype(np.float32)
+    gb = cv2.resize(gb, None, fx=q, fy=q, interpolation=cv2.INTER_AREA).astype(np.float32)
+    k0 = fa["size"] / fb["size"]
+    # ECC warps A's region into B: x_B = M @ [x_A, 1]; start from the landmark estimate (inverse map)
+    warp = np.array([[1 / k0, 0, (fb["x"] - fa["x"] / k0) * q], [0, 1 / k0, (fb["y"] - fa["y"] / k0) * q]], np.float32)
+    r = fa["size"] * q * 1.6
+    x0, y0 = int(max(0, fa["x"] * q - r)), int(max(0, fa["y"] * q - r * 0.9))
+    x1, y1 = int(min(ga.shape[1], fa["x"] * q + r)), int(min(ga.shape[0], fa["y"] * q + r * 1.4))
+    mask = np.zeros(ga.shape, np.uint8)
+    mask[y0:y1, x0:x1] = 255
+    try:
+        cc, warp = cv2.findTransformECC(ga, gb, warp, cv2.MOTION_AFFINE,
+                                        (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 200, 1e-6), mask, 5)
+    except cv2.error:
+        return None
+    sx, sy = np.hypot(warp[0, 0], warp[1, 0]), np.hypot(warp[0, 1], warp[1, 1])
+    k = 2 / (sx + sy)  # A units per B unit
+    # Where B's face point lands in A, through the full affine (x_B = A x_A + c, at scale q). Small
+    # rotation/shear is dropped from the result, so anchor the shift at the face, not at the
+    # image corner: there half a degree of tilt would move the face by ~10 px.
+    A, c = warp[:, :2].astype(np.float64), warp[:, 2].astype(np.float64)
+    fa_x, fa_y = np.linalg.solve(A, np.array([fb["x"] * q, fb["y"] * q]) - c) / q
+    tx, ty = fa_x - k * fb["x"], fa_y - k * fb["y"]
+    ok = cc > 0.55 and 0.8 < k < 1.25 and abs(tx) < 0.2 * w and abs(ty) < 0.2 * h
+    return {"k": round(float(k), 4), "tx": round(float(tx), 2), "ty": round(float(ty), 2),
+            "fx": fb["x"], "fy": fb["y"], "match": round(float(cc), 3), "ok": bool(ok), "w": w, "h": h}
+
+
+def cmd_align(a):
+    det = vision.FaceDetector.create_from_options(vision.FaceDetectorOptions(
+        base_options=BaseOptions(model_asset_path=f"{MODELS}/face.tflite"), min_detection_confidence=0.5))
+    json.dump(align_faces(det, a.src, a.start_or_img), open(a.out_or_img, "w"))
+
+
 def cmd_removebg(a):
     sw, sh, src_fps = probe(a.src)
     fps = 60 if src_fps > 45 else 30  # constant rate on both ends (phones record variable frame rate)
@@ -126,6 +192,13 @@ def cmd_removebg(a):
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "align":
+        ap = argparse.ArgumentParser()
+        ap.add_argument("cmd")
+        ap.add_argument("src")
+        ap.add_argument("start_or_img")
+        ap.add_argument("out_or_img")
+        return cmd_align(ap.parse_args())
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["faces", "removebg"])
     ap.add_argument("src")

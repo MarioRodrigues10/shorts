@@ -9,6 +9,7 @@ import { Dialog, Button, Progress, Segmented } from "./ui/index.jsx";
 import { DownloadSimple } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { celebrate } from "../lib/mascot.js";
+import { smoothParams, alignSmoothCuts } from "../core/smooth.js";
 
 export function startExport() { emit("export"); }
 
@@ -45,7 +46,7 @@ function buildSpec(opts) {
   }
   const even = (x) => Math.round(x / 2) * 2;
   return { W: even(p.canvas.w * k), H: even(p.canvas.h * k), scale: k, fps, quality: opts.quality, bg: p.canvas.bg, duration: total,
-    main: main.clips.map((c, i) => ({ ...c, mute: c.mute || !!main.muted, tdur: M.transDur(main.clips, i) })),
+    main: main.clips.map((c, i) => ({ ...c, mute: c.mute || !!main.muted, tdur: M.transDur(main.clips, i), smooth: smoothParams(p, main.clips, i) })),
     overlays, audio, audioOpts: p.audio, name: p.name };
 }
 
@@ -63,6 +64,7 @@ export default function ExportDialog() {
 
   async function run() {
     if (!S.p) return;
+    await alignSmoothCuts(); // smooth cuts changed since they were measured
     const spec = buildSpec(opts);
     const fps = spec.fps;
     if (!spec.duration) { toast("The timeline is empty"); return; }

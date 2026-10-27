@@ -79,6 +79,7 @@ So I built my own: the editing flow I liked in CapCut, running natively on Linux
 - Trim, split, delete left/right of the playhead, duplicate, copy/paste, markers, snapping. Zoom stays anchored on the playhead.
 - Transitions (dissolve, dips, slides, wipes, zoom, circle) and keyframes for position, scale, rotation and opacity.
 - Speed, flip, freeze frame, detach audio, slow zoom (Ken Burns), intro effects.
+- **Smooth cuts**: hides jump cuts by lining your face up across the cut, then gliding back to the normal framing.
 
 **Look and sound**
 - Color looks and adjustments: brightness, contrast, saturation, temperature, sharpen, denoise.

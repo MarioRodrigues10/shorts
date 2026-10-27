@@ -4,6 +4,7 @@
 // unloaded when idle to keep memory low.
 import { clamp } from "./util.js";
 import { durOf, endOf, mainTrack, transDur } from "./model.js";
+import { smoothParams, smoothAt, usesCropPath } from "./smooth.js";
 import { kfValue, setProp, hasKf, setKf } from "./kf.js";
 import * as Media from "./media.js";
 import { drawLayer, drawGuides } from "./layer.js";
@@ -21,6 +22,8 @@ export class Player {
     this.playing = false;
     this.t = 0;
     this.pool = new Map();
+    this.ac = null;              // Web Audio, for sample-accurate silence at cuts (see _gate)
+    this.gains = new WeakMap();  // media element -> GainNode
     this.images = new Map();
     this.dirty = true;
     this.boxes = {};
@@ -44,6 +47,8 @@ export class Player {
     if (this.t >= this.total - 0.05) this.t = 0;
     this.t0 = this.t; this.p0 = performance.now();
     this.playing = true;
+    // Created on a user action (play), so the browser lets it run.
+    try { this.ac = this.ac || new AudioContext(); if (this.ac.state === "suspended") this.ac.resume(); } catch { this.ac = null; }
     this.hooks.onPlayState?.(true);
   }
   pause() {
@@ -130,6 +135,33 @@ export class Player {
     if (this.images.size > 16) this.images.clear(); // decoded bitmaps live in this tab's RAM
   }
 
+  // Silence a main-track element exactly at its clip's out point, on the audio clock. Pausing it
+  // from this loop is too late when the page stutters or the sound output buffers audio, and the
+  // words after the cut leak through. Through a GainNode the samples past the cut are zeroed
+  // before they reach the output, whatever the latency.
+  _gate(el, clip) {
+    const ac = this.ac;
+    if (!ac || ac.state !== "running") return;
+    let g = this.gains.get(el);
+    if (!g) {
+      if (!this.playing) return;
+      try {
+        g = ac.createGain();
+        ac.createMediaElementSource(el).connect(g).connect(ac.destination);
+      } catch { return; }
+      this.gains.set(el, g);
+    }
+    const now = ac.currentTime, gain = g.gain;
+    gain.cancelScheduledValues(now);
+    const left = (clip.out - el.currentTime) / (clip.speed || 1);
+    if (!this.playing || el.paused || left > 0.6) { gain.setValueAtTime(1, now); return; }
+    if (left <= 0.005) { gain.setValueAtTime(0, now); return; }
+    const end = now + left;
+    gain.setValueAtTime(1, now);
+    gain.setValueAtTime(1, end - 0.004);
+    gain.linearRampToValueAtTime(0, end); // 4 ms: no click
+  }
+
   _sync(el, srcT, rate, play, vol, muted, startTol = 0.05) {
     if (el.playbackRate !== rate) el.playbackRate = clamp(rate, 0.0625, 16);
     el.volume = clamp(vol, 0, 1);
@@ -203,6 +235,7 @@ export class Player {
           if (this.playing && mainEl.seeking) { this.t0 = t; this.p0 = performance.now(); }
         }
         this.mainKey = key;
+        this._gate(mainEl, c);
       }
       if (prev) {
         const pm = Media.meta(prev.mid);
@@ -212,6 +245,7 @@ export class Player {
           prevEl = this._get(key, prev.mid);
           const srcT = prev.in + (t - prev.start) * (prev.speed || 1);
           this._sync(prevEl, srcT, prev.speed || 1, this.playing, vol((prev.volume ?? 1) * (1 - tp) * breath(prev, srcT)), !!(prev.mute || mainT.muted));
+          this._gate(prevEl, prev);
         }
       }
     }
@@ -383,12 +417,16 @@ export class Player {
   _drawMain(ctx, p, c, m, src, lt, W, H) {
     ctx.save();
     ctx.filter = adjFilter(c.adj);
+    const clips = mainTrack(p).clips;
+    const sm = smoothAt(smoothParams(p, clips, clips.indexOf(c)), lt, W, H); // smooth cut
+    const inCrop = sm && usesCropPath(c);
+    if (sm && !inCrop) { ctx.translate(sm.tx, sm.ty); ctx.scale(sm.k, sm.k); } // outermost transform
     if (c.flip) { ctx.translate(W, 0); ctx.scale(-1, 1); }
-    this._drawMainInner(ctx, p, c, m, src, lt, W, H);
+    this._drawMainInner(ctx, p, c, m, src, lt, W, H, inCrop ? sm : null);
     ctx.restore();
   }
 
-  _drawMainInner(ctx, p, c, m, src, lt, W, H) {
+  _drawMainInner(ctx, p, c, m, src, lt, W, H, sm = null) {
     const vw = src.videoWidth || src.naturalWidth, vh = src.videoHeight || src.naturalHeight;
     const kx = vw / (m.width || vw), ky = vh / (m.height || vh);
     // the crop (source units) acts as the whole picture from here on
@@ -397,6 +435,14 @@ export class Player {
     const z = zoomAt(c, lt);
     const px = kfValue(c, "x", lt, c.x || 0), py = kfValue(c, "y", lt, c.y || 0);
     const fill = (c.fit || "fill") === "fill";
+    if (fill && z >= 1 && sm) {
+      // smooth cut: scale by k and move the crop window by -t (same as the export's crop expression)
+      const s = Math.max(W / sw, H / sh) * z * sm.k;
+      const cx = clamp((sw * s - sm.k * W) / 2 * (1 + px) - sm.tx, 0, sw * s - W);
+      const cy = clamp((sh * s - sm.k * H) / 2 * (1 + py) - sm.ty, 0, sh * s - H);
+      ctx.drawImage(src, (ox + cx / s) * kx, (oy + cy / s) * ky, (W / s) * kx, (H / s) * ky, 0, 0, W, H);
+      return;
+    }
     if (fill && z >= 1) {
       const s = Math.max(W / sw, H / sh) * z;
       const cropX = (sw * s - W) / 2 * (1 + px), cropY = (sh * s - H) / 2 * (1 + py);

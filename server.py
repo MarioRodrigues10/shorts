@@ -918,7 +918,41 @@ def crop_box(c, sw, sh):
     return ev(sw * l), ev(sh * t), max(2, ev(sw * (1 - l - r))), max(2, ev(sh * (1 - t - b)))
 
 
-def main_clip_filters(c, m, W, H, bg, fps=30, off=0.0):
+def smooth_filter(sm, W, H, off):
+    """Smooth cut on a finished frame (clips not framed by a crop): the clip starts shifted/scaled so
+    the face lines up with the frame before the cut, then glides back over sm["dur"] seconds
+    (smoothstep). Output pixel X shows content at (X - t)/k, with k >= 1 and t within the frame's
+    slack, so the picture always covers the frame. Mirrors smoothAt() in smooth.js."""
+    lam = smooth_lam(sm, f"(t+{off:.5f})")
+    K = f"(1+{float(sm['k']) - 1:.5f}*{lam})"
+    SW, SH = f"(2*ceil({W}*{K}/2))", f"(2*ceil({H}*{K}/2))"
+    X = f"min(max({float(sm['tx']) * W:.3f}*{lam},{W}-{SW}),0)"
+    Y = f"min(max({float(sm['ty']) * H:.3f}*{lam},{H}-{SH}),0)"
+    return (f"split[pa][pb];[pa]{canvas(W, H)}[pbg];[pb]scale=w='{SW}':h='{SH}':eval=frame:flags={SCALE_FLAGS}[ps];"
+            f"[pbg][ps]overlay=x='{X}':y='{Y}':eval=frame:format=yuv444")
+
+
+def main_clip_filters(c, m, W, H, bg, fps=30, off=0.0, smooth=True):
+    sm = c.get("smooth") if smooth else None
+    if sm and off < float(sm.get("dur", 0)) and uses_crop_path(c):
+        return _main_clip_filters(c, m, W, H, bg, fps, off, sm)
+    if sm and off < float(sm.get("dur", 0)):
+        return main_clip_filters(c, m, W, H, bg, fps, off, False).replace(",setsar=1,format=yuv420p", "") + \
+            "," + smooth_filter(sm, W, H, off) + ",setsar=1,format=yuv420p"
+    return _main_clip_filters(c, m, W, H, bg, fps, off)
+
+
+def uses_crop_path(c):
+    return c.get("fit", "fill") == "fill" and not can_shrink(c)
+
+
+def smooth_lam(sm, T):
+    D = max(float(sm["dur"]), 0.04)
+    x = f"clip({T}/{D:.4f},0,1)"
+    return f"(1-({x}*{x}*(3-2*{x})))"
+
+
+def _main_clip_filters(c, m, W, H, bg, fps=30, off=0.0, sm=None):
     """Video filter for one main-track clip (or a piece of it starting at clip time `off`).
     Mirrors _drawMainInner() in player.js."""
     speed = float(c.get("speed", 1.0))
@@ -942,13 +976,32 @@ def main_clip_filters(c, m, W, H, bg, fps=30, off=0.0):
     if fill and not can_shrink(c):
         # covers the frame the whole time: scale up and crop (no background needed)
         s0 = max(W / sw, H / sh)
-        return (f"{pre},scale=w='2*ceil({sw}*{s0}*{zexpr}/2)':h='2*ceil({sh}*{s0}*{zexpr}/2)'{ev}:flags={SCALE_FLAGS},"
-                f"crop={W}:{H}:x='(iw-{W})/2*(1+{px})':y='(ih-{H})/2*(1+{py})',setsar=1,format=yuv420p")
+        if not animated and not sm:
+            return (f"{pre},scale=w='2*ceil({sw}*{s0}*{zexpr}/2)':h='2*ceil({sh}*{s0}*{zexpr}/2)':flags={SCALE_FLAGS},"
+                    f"crop={W}:{H}:x='(iw-{W})/2*(1+{px})':y='(ih-{H})/2*(1+{py})':exact=1,setsar=1,format=yuv420p")
+        # Size changes per frame (zoom animation, smooth cut). A crop after a scale with eval=frame
+        # keeps the first frame's size (zooms drift off-centre), so place the scaled picture on a
+        # fixed canvas instead, at a position computed from the same size expression.
+        # Smooth cut: scale by K and move the window by -t within the picture outside the frame.
+        K, TX, TY = "1", "0", "0"
+        if sm:
+            lam = smooth_lam(sm, T)
+            K = f"(1+{float(sm['k']) - 1:.5f}*{lam})"
+            TX, TY = f"({float(sm['tx']) * W:.3f}*{lam})", f"({float(sm['ty']) * H:.3f}*{lam})"
+        SW = f"(2*ceil({sw}*{s0}*{zexpr}*{K}/2))"
+        SH = f"(2*ceil({sh}*{s0}*{zexpr}*{K}/2))"
+        X = f"min(max(({SW}-{K}*{W})/2*(1+{px})-{TX},0),{SW}-{W})"
+        Y = f"min(max(({SH}-{K}*{H})/2*(1+{py})-{TY},0),{SH}-{H})"
+        return (f"{pre},split[zb][zf];[zb]{canvas(W, H)}[zbg];"
+                f"[zf]scale=w='{SW}':h='{SH}':eval=frame:flags={SCALE_FLAGS}[zs];"
+                f"[zbg][zs]overlay=x='-({X})':y='-({Y})':eval=frame:format=yuv444,setsar=1,format=yuv420p")
     s0 = (max if fill else min)(W / sw, H / sh)
-    fg = (f"scale=w='2*ceil({sw}*{s0}*{zexpr}/2)':h='2*ceil({sh}*{s0}*{zexpr}/2)'{ev}:flags={SCALE_FLAGS}")
+    FW = f"(2*ceil({sw}*{s0}*{zexpr}/2))"  # the size scale produces (overlay's w/h would be stale)
+    FH = f"(2*ceil({sh}*{s0}*{zexpr}/2))"
+    fg = f"scale=w='{FW}':h='{FH}'{ev}:flags={SCALE_FLAGS}"
     # fill keeps the crop path's meaning of x/y (same formula), so scaling across 100% is seamless
-    pos = (f"x='({W}-w)/2*(1+{px})':y='({H}-h)/2*(1+{py})'" if fill else
-           f"x='({W}-w)/2+{px}*{W}/2':y='({H}-h)/2+{py}*{H}/2'")
+    pos = (f"x='({W}-{FW})/2*(1+{px})':y='({H}-{FH})/2*(1+{py})'" if fill else
+           f"x='({W}-{FW})/2+{px}*{W}/2':y='({H}-{FH})/2+{py}*{H}/2'")
     if bg == "blur":
         back = (f"scale={W // 4}:{H // 4}:force_original_aspect_ratio=increase,crop={W // 4}:{H // 4},"
                 f"boxblur=12:2,eq=brightness=-0.12:saturation=1.1,scale={W}:{H}")
@@ -957,6 +1010,11 @@ def main_clip_filters(c, m, W, H, bg, fps=30, off=0.0):
         back = f"drawbox=c={color}:t=fill,scale={W}:{H}"
     return (f"{pre},split[bg][fg];[bg]{back}[bgs];[fg]{fg}[fgs];[bgs][fgs]overlay={pos}:eval=frame,"
             f"setsar=1,format=yuv420p")
+
+
+def canvas(W, H):
+    """A black W x H frame per input frame (cheap: from a 2x2 crop), to place pictures on."""
+    return f"crop=2:2:0:0,scale={W}:{H}:flags=neighbor,drawbox=c=black:t=fill"
 
 
 def _cache_out(key_obj):
@@ -1027,8 +1085,8 @@ def render_main_piece(c, W, H, bg, fps, a, b, nframes, job_progress=None, repair
     dur = nframes / fps
     declip = bool(repair and m.get("clipped"))
     key_obj = {k: c.get(k) for k in ("mid", "in", "out", "speed", "volume", "mute", "afadeIn", "afadeOut",
-                                     "fit", "zoom", "zoomEnd", "x", "y", "effect", "adj", "kf", "flip", "crop")}
-    key_obj.update(W=W, H=H, bg=bg, fps=fps, v=7, path=m["path"], declip=declip, a=round(a, 4), n=nframes)
+                                     "fit", "zoom", "zoomEnd", "x", "y", "effect", "adj", "kf", "flip", "crop", "smooth")}
+    key_obj.update(W=W, H=H, bg=bg, fps=fps, v=10, path=m["path"], declip=declip, a=round(a, 4), n=nframes)
     if breaths:
         key_obj.update(breaths=breaths, breath_gain=round(BREATH_GAIN, 4))
     out, key = _cache_out(key_obj)
@@ -1590,6 +1648,94 @@ def audio_library(limit=300):
 VISION = [venv_python(".venv-vision"), str(APP_DIR / "vision.py")]
 
 
+def measure_smooth_cut(req):
+    """Smooth cut for the cut between clips a and b (main track): render the last frame of a and the
+    first frame of b exactly as framed in the video, line the face up (vision.py align) and return
+    {k, tx, ty} (tx/ty as fractions of W/H) or {"error": ...}. Small and quick: no heavy-job lock."""
+    W, H, bg, fps = int(req["W"]), int(req["H"]), req.get("bg", "blur"), int(req.get("fps", 30))
+    if not Path(VISION[0]).exists():
+        return {"error": "Smooth cut needs the vision tools (run the setup script without --no-vision)"}
+    work = DATA_DIR / f"smooth_{uuid.uuid4().hex[:8]}"
+    work.mkdir(parents=True, exist_ok=True)
+    try:
+        shots = []
+        for tag, c, at_end in (("a", req["a"], True), ("b", req["b"], False)):
+            m = load_meta(check_id(c["mid"]))
+            if not m or m["kind"] != "video" or not Path(m["path"]).exists():
+                return {"error": "both sides of the cut must be videos"}
+            speed = float(c.get("speed", 1.0))
+            dur = (float(c["out"]) - float(c["in"])) / speed
+            off = max(0.0, dur - 1.5 / fps) if at_end else 0.0
+            vf = main_clip_filters(c, m, W, H, bg, fps, off, smooth=False)
+            png = work / f"{tag}.png"
+            subprocess.run(low(["ffmpeg", "-v", "error", "-y", "-ss", f"{float(c['in']) + off * speed:.4f}", "-i", m["path"],
+                                "-vf", vf, "-frames:v", "1", str(png)]), check=True, timeout=60, **LOW_FLAGS)
+            shots.append(png)
+        out = work / "align.json"
+        r = subprocess.run(low(VISION + ["align", str(shots[0]), str(shots[1]), str(out)], 15),
+                           capture_output=True, text=True, timeout=120, **LOW_FLAGS)
+        if r.returncode != 0 or not out.exists():
+            return {"error": "face alignment failed"}
+        al = json.loads(out.read_text())
+        if not al or not al.get("ok"):
+            return {"error": "no matching face on both sides of the cut"}
+        return smooth_params(al, W, H, crop_room(req["b"], load_meta(check_id(req["b"]["mid"])), W, H))
+    except (subprocess.SubprocessError, OSError, KeyError, ValueError) as e:
+        return {"error": str(e)}
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def crop_room(c, m, W, H):
+    """Clip b's crop at its first frame: scaled picture size and crop offset (output pixels), so a
+    smooth cut can move within the picture outside the frame. None when it isn't framed by a crop."""
+    if not m or not uses_crop_path(c):
+        return None
+    sw, sh = max(1, m["width"]), max(1, m["height"])
+    box = crop_box(c, sw, sh)
+    if box:
+        sw, sh = box[2], box[3]
+    kf = c.get("kf") or {}
+    first = lambda prop, base: float(kf[prop][0]["v"]) if kf.get(prop) else float(base)
+    z = first("zoom", c.get("zoom", 1.0))
+    if c.get("effect") == "zoom":
+        z *= 1.25
+    s = max(W / sw, H / sh) * z
+    Ws, Hs = sw * s, sh * s
+    return {"Ws": Ws, "Hs": Hs, "X0": (Ws - W) / 2 * (1 + first("x", c.get("x", 0))),
+            "Y0": (Hs - H) / 2 * (1 + first("y", c.get("y", 0)))}
+
+
+def smooth_params(al, W, H, room=None):
+    """From the measured B->A map (x_A = k*x_B + t) to a transform that keeps the frame covered.
+    With a crop (room), the shift uses picture outside the frame: k stays as measured unless the
+    picture runs out. Otherwise (and as a fallback) it zooms in a little more than measured
+    (at most 12%); beyond that the shift is only partial."""
+    km, fbx, fby = float(al["k"]), float(al["fx"]), float(al["fy"])
+    fax, fay = km * fbx + float(al["tx"]), km * fby + float(al["ty"])
+
+    def fits(k):
+        tx, ty = fax - k * fbx, fay - k * fby
+        if room:  # new crop offset k*X0 - t must stay inside the k-scaled picture
+            ok = all(0 <= k * o - t <= k * S - size for o, t, S, size in
+                     ((room["X0"], tx, room["Ws"], W), (room["Y0"], ty, room["Hs"], H)))
+        else:
+            ok = k >= 1 and (1 - k) * W <= tx <= 0 and (1 - k) * H <= ty <= 0
+        return ok, tx, ty
+
+    lo = max(km, W / room["Ws"], H / room["Hs"]) if room else max(1.0, km)
+    k = next((lo * (1 + i / 400) for i in range(49) if fits(lo * (1 + i / 400))[0]), lo * 1.12)
+    tx, ty = fax - k * fbx, fay - k * fby
+    if room:  # clamp the crop window inside the picture
+        tx = k * room["X0"] - min(max(k * room["X0"] - tx, 0), k * room["Ws"] - W)
+        ty = k * room["Y0"] - min(max(k * room["Y0"] - ty, 0), k * room["Hs"] - H)
+    else:
+        tx = min(0.0, max((1 - k) * W, tx))
+        ty = min(0.0, max((1 - k) * H, ty))
+    return {"k": round(k, 5), "tx": round(tx / W, 6), "ty": round(ty / H, 6),
+            "match": al.get("match"), "shift": round(((fax - fbx) ** 2 + (fay - fby) ** 2) ** 0.5, 1)}
+
+
 def run_vision(job, args):
     """One heavy job at a time (shares the export lock), low priority, progress from stdout."""
     if not EXPORT_LOCK.acquire(blocking=False):
@@ -1961,6 +2107,8 @@ class Handler(BaseHTTPRequestHandler):
             job = new_job("convert")
             run_job(job, convert_plain, src, out)
             return self.send_json({"job": job["id"]})
+        if path == "/api/smooth":
+            return self.send_json(measure_smooth_cut(self.read_json()))
         if path == "/api/reveal":
             p = expand(self.read_json()["path"])
             target = p if p.is_dir() else p.parent
