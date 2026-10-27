@@ -3,7 +3,8 @@ import { Play, Pause, SkipBack, SkipForward, DeviceMobile, FrameCorners, ArrowsO
 import { S, layer, select, begin, changed, clipById } from "../core/store.js";
 import { Player, endOfMain } from "../core/player.js";
 import { CAPTION_PRESETS } from "../core/layer.js";
-import { fmt, emit } from "../core/util.js";
+import { fmt, emit, on, clamp } from "../core/util.js";
+import { surfaceLevel } from "../core/clean.js";
 import { useBus } from "../lib/hooks.js";
 import { IconBtn, Tip, Button, Popover } from "./ui/index.jsx";
 import { jumpCut } from "./Editor.jsx";
@@ -26,6 +27,34 @@ function setAspect(p, w, h) {
   const presetY = CAPTION_PRESETS[cap.preset]?.posY ?? 0.64;
   if (wide && Math.abs(cap.posY - presetY) < 0.02) cap.posY = LANDSCAPE_POS_Y;
   else if (!wide && Math.abs(cap.posY - LANDSCAPE_POS_Y) < 0.02) cap.posY = presetY;
+}
+
+// Draw a box on the preview for "Clean surface" (started from the Adjust tab with emit("pick-clean", clipId)).
+function CleanPicker({ canvasRef, wrapRef }) {
+  const [clipId, setClipId] = useState(null);
+  const [box, setBox] = useState(null);
+  useEffect(() => on("pick-clean", (id) => { setClipId(id); setBox(null); }), []);
+  if (!clipId || !canvasRef.current) return null;
+  const cr = canvasRef.current.getBoundingClientRect(), wr = wrapRef.current.getBoundingClientRect();
+  const frac = (e) => [clamp((e.clientX - cr.left) / cr.width, 0, 1), clamp((e.clientY - cr.top) / cr.height, 0, 1)];
+  const finish = () => {
+    const c = M.find(S.p, clipId)?.clip;
+    if (c && box && box.w > 0.02 && box.h > 0.02) {
+      const cv = canvasRef.current, ctx = cv.getContext("2d");
+      const level = surfaceLevel(ctx, box.x * cv.width, box.y * cv.height, box.w * cv.width, box.h * cv.height);
+      commit(() => { c.clean = { strength: c.clean?.strength || 2, areas: [...(c.clean?.areas || []), { x: box.x, y: box.y, w: box.w, h: box.h, level }] }; }, null, { noTimeline: true });
+    }
+    setClipId(null); setBox(null);
+  };
+  return (
+    <div className="absolute z-20 cursor-crosshair" style={{ left: cr.left - wr.left, top: cr.top - wr.top, width: cr.width, height: cr.height }}
+      onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); const [x, y] = frac(e); setBox({ x0: x, y0: y, x, y, w: 0, h: 0 }); }}
+      onPointerMove={(e) => { if (!box) return; const [x, y] = frac(e); setBox({ ...box, x: Math.min(x, box.x0), y: Math.min(y, box.y0), w: Math.abs(x - box.x0), h: Math.abs(y - box.y0) }); }}
+      onPointerUp={finish} onKeyDown={(e) => e.key === "Escape" && setClipId(null)}>
+      <div className="pointer-events-none absolute inset-x-0 top-2 mx-auto w-fit rounded-md bg-black/70 px-2 py-1 text-xs text-white">Drag a box over the surface to clean · Esc to cancel</div>
+      {box && <div className="pointer-events-none absolute border-2 border-dashed border-white" style={{ left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${box.w * 100}%`, height: `${box.h * 100}%` }} />}
+    </div>
+  );
 }
 
 export default function Stage() {
@@ -67,6 +96,7 @@ export default function Stage() {
     <section className="flex min-w-0 flex-1 flex-col bg-stage">
       <div ref={wrapRef} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
         <canvas ref={canvasRef} className="rounded-lg bg-black touch-none" />
+        <CleanPicker canvasRef={canvasRef} wrapRef={wrapRef} />
         {empty && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <div className="rounded-lg bg-surface/90 px-5 py-3 text-center text-xs text-muted">

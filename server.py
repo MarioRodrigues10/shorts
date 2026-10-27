@@ -932,12 +932,55 @@ def smooth_filter(sm, W, H, off):
             f"[pbg][ps]overlay=x='{X}':y='{Y}':eval=frame:format=yuv444")
 
 
+CLEAN_STRENGTH = {1: (1, 2), 2: (2, 3), 3: (3, 5)}  # min/max passes, median radius at 1080p (clean.js)
+CLEAN_FEATHER = 0.04
+
+
+def clean_filter(cl, W, H):
+    """Clean surface: in each box, lint/dust/crumbs are pulled to the surface level (brightness only,
+    edges fade in). Appended to a clip's finished frame. Mirrors cleanBox() in clean.js."""
+    passes, rad = CLEAN_STRENGTH.get(int(cl.get("strength", 2)), CLEAN_STRENGTH[2])
+    k = min(W, H) / 1080
+    passes, rad = max(1, round(passes * k)), max(1, round(rad * k))
+    parts, chain = [], "[cin]"
+    for i, a in enumerate(cl.get("areas") or []):
+        x, y = int(float(a["x"]) * W) // 2 * 2, int(float(a["y"]) * H) // 2 * 2
+        w, h = max(4, int(float(a["w"]) * W) // 2 * 2), max(4, int(float(a["h"]) * H) // 2 * 2)
+        w, h = min(w, W - x), min(h, H - y)
+        if w < 4 or h < 4:
+            continue
+        level = float(a.get("level", 40))
+        dark = level < 128
+        L = 16 + ((level + 4) if dark else (level - 4)) * 219 / 255  # limited-range luma
+        mm = ",".join([("erosion" if dark else "dilation") + "=threshold1=0:threshold2=0:threshold3=0"] * passes)
+        lut = (f"if(gt(val,{L:.1f}),{L:.1f}+(val-{L:.1f})*0.35,val)" if dark else  # quoted: plain commas
+               f"if(lt(val,{L:.1f}),{L:.1f}+(val-{L:.1f})*0.35,val)")
+        fe = max(1.0, min(w, h) * CLEAN_FEATHER)
+        alpha = f"255*clip(min(min(X,W-1-X),min(Y,H-1-Y))/{fe:.2f},0,1)"
+        parts.append(f"{chain}split[cm{i}][cs{i}];[cs{i}]crop={w}:{h}:{x}:{y},format=yuva444p,{mm},median=radius={rad}:planes=1,"
+                     f"lutyuv=y='{lut}',geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='{alpha}'[cp{i}];"
+                     f"[cm{i}][cp{i}]overlay={x}:{y}:format=yuv444[co{i}]")
+        chain = f"[co{i}]"
+    if not parts:
+        return None
+    return "split=1[cin];" + ";".join(parts), chain
+
+
 def main_clip_filters(c, m, W, H, bg, fps=30, off=0.0, smooth=True):
+    base = _framed_filters(c, m, W, H, bg, fps, off, smooth)
+    cf = clean_filter(c["clean"], W, H) if c.get("clean") else None
+    if not cf:
+        return base
+    graph, out = cf
+    return f"{base},{graph};{out}format=yuv420p"
+
+
+def _framed_filters(c, m, W, H, bg, fps=30, off=0.0, smooth=True):
     sm = c.get("smooth") if smooth else None
     if sm and off < float(sm.get("dur", 0)) and uses_crop_path(c):
         return _main_clip_filters(c, m, W, H, bg, fps, off, sm)
     if sm and off < float(sm.get("dur", 0)):
-        return main_clip_filters(c, m, W, H, bg, fps, off, False).replace(",setsar=1,format=yuv420p", "") + \
+        return _framed_filters(c, m, W, H, bg, fps, off, False).replace(",setsar=1,format=yuv420p", "") + \
             "," + smooth_filter(sm, W, H, off) + ",setsar=1,format=yuv420p"
     return _main_clip_filters(c, m, W, H, bg, fps, off)
 
@@ -1085,7 +1128,7 @@ def render_main_piece(c, W, H, bg, fps, a, b, nframes, job_progress=None, repair
     dur = nframes / fps
     declip = bool(repair and m.get("clipped"))
     key_obj = {k: c.get(k) for k in ("mid", "in", "out", "speed", "volume", "mute", "afadeIn", "afadeOut",
-                                     "fit", "zoom", "zoomEnd", "x", "y", "effect", "adj", "kf", "flip", "crop", "smooth")}
+                                     "fit", "zoom", "zoomEnd", "x", "y", "effect", "adj", "kf", "flip", "crop", "smooth", "clean")}
     key_obj.update(W=W, H=H, bg=bg, fps=fps, v=10, path=m["path"], declip=declip, a=round(a, 4), n=nframes)
     if breaths:
         key_obj.update(breaths=breaths, breath_gain=round(BREATH_GAIN, 4))

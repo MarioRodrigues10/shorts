@@ -5,7 +5,7 @@ import { S, commit } from "../core/store.js";
 import * as M from "../core/model.js";
 import * as Media from "../core/media.js";
 import * as A from "../core/actions.js";
-import { api, on } from "../core/util.js";
+import { api, on, emit } from "../core/util.js";
 import { TEXT_PRESETS } from "../core/layer.js";
 import { kfValue, kfAt, hasKf, setKf, removeKf, kfTimes } from "../core/kf.js";
 import { timeListeners } from "./Stage.jsx";
@@ -169,6 +169,25 @@ const LOOKS = [
   ["bright", "Bright", { brightness: 0.08, contrast: 0.04, saturation: 0.06 }],
   ["bw", "B&W", { saturation: -1, contrast: 0.18 }],
 ];
+function CleanSection({ c }) {
+  const cl = c.clean || {}, n = cl.areas?.length || 0;
+  const set = (fn) => commit(fn, null, { noTimeline: true });
+  return (
+    <Section title="Clean surface">
+      <p className="mb-2 text-[11px] text-subtle">Removes dust, lint and crumbs from a desk or mat. Draw a box over it on the preview.</p>
+      <div className="flex gap-2">
+        <Button className="flex-1 justify-center" onClick={() => emit("pick-clean", c.id)}>{n ? "Add another box" : "Draw a box"}</Button>
+        {n > 0 && <Button variant="ghost" onClick={() => set(() => { delete c.clean; })}>Remove</Button>}
+      </div>
+      {n > 0 && <Segmented label="Strength" value={cl.strength || 2} onChange={(v) => set(() => { c.clean = { ...cl, strength: v }; })}
+        options={[[1, "Light"], [2, "Medium"], [3, "Strong"]]} />}
+      {n > 0 && <Button size="sm" variant="ghost" className="mt-1" onClick={() => set(() => {
+        for (const x of M.mainTrack(S.p).clips) if (x !== c && Media.meta(x.mid)?.kind === "video") x.clean = JSON.parse(JSON.stringify(cl));
+      })}>Use on every clip</Button>}
+    </Section>
+  );
+}
+
 function AdjustTab({ c }) {
   const adj = c.adj || {};
   const set = (k, v) => commit(() => { c.adj = { ...(c.adj || {}), [k]: v }; c.look = "custom"; }, `adj.${c.id}.${k}`, { noTimeline: true });
@@ -200,6 +219,7 @@ function AdjustTab({ c }) {
         <Slider label="Reduce noise" value={adj.denoise || 0} min={0} max={1} resetTo={0} format={pct} onChange={(v) => set("denoise", v)} />
         <p className="mt-1 text-[11px] text-subtle">Applied on export only.</p>
       </Section>
+      {M.find(S.p, c.id)?.track.kind === "main" && <CleanSection c={c} />}
       <Section><Button className="w-full justify-center" onClick={applyAll}>Apply to all clips</Button></Section>
     </>
   );

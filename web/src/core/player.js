@@ -5,6 +5,7 @@
 import { clamp } from "./util.js";
 import { durOf, endOf, mainTrack, transDur } from "./model.js";
 import { smoothParams, smoothAt, usesCropPath } from "./smooth.js";
+import { cleanBox } from "./clean.js";
 import { kfValue, setProp, hasKf, setKf } from "./kf.js";
 import * as Media from "./media.js";
 import { drawLayer, drawGuides } from "./layer.js";
@@ -424,6 +425,14 @@ export class Player {
     if (c.flip) { ctx.translate(W, 0); ctx.scale(-1, 1); }
     this._drawMainInner(ctx, p, c, m, src, lt, W, H, inCrop ? sm : null);
     ctx.restore();
+    const cl = c.clean;
+    if (cl?.areas?.length) {
+      const k = this.canvas.width / W; // canvas px per output px
+      for (const a of cl.areas) {
+        try { cleanBox(ctx, { x: a.x * this.canvas.width, y: a.y * this.canvas.height, w: a.w * this.canvas.width, h: a.h * this.canvas.height }, cl.strength || 2, a.level ?? 40, k); }
+        catch { /* canvas not readable yet */ }
+      }
+    }
   }
 
   _drawMainInner(ctx, p, c, m, src, lt, W, H, sm = null) {
