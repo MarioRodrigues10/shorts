@@ -1,3 +1,6 @@
-# Transcription (CPU, int8) — installed into .venv by scripts/setup.sh
+# Transcription (CPU) — installed into .venv by scripts/setup.sh
+# Phonon-2 for English (on Linux, setup installs the CPU-only torch wheel first)
+fermion-research[mlx]>=0.2.15
+# Whisper for other languages and the "Whisper large" second opinion (int8)
 faster-whisper>=1.1
 numpy>=1.26

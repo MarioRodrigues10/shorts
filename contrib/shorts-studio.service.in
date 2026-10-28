@@ -4,7 +4,7 @@ Description=Shorts (local short-form video editor) on http://127.0.0.1:7377
 [Service]
 ExecStart=/usr/bin/env python3 @ROOT@/server.py
 Restart=on-failure
-# Keep the machine usable: the studio (and its ffmpeg/Whisper children) can never
+# Keep the machine usable: the studio (and its ffmpeg/transcription children) can never
 # eat all RAM or CPU. If it hits the memory cap, only the studio job dies.
 Nice=10
 CPUWeight=40

@@ -26,7 +26,7 @@ Auto captions · edit by deleting words · one-click silence and retake removal 
 ## From raw recording to posted in about two minutes
 
 1. **Drop in your video.** Phone footage, screen recordings, anything ffmpeg reads.
-2. **Click _Auto captions_.** Whisper transcribes only what's on your timeline, on your own CPU.
+2. **Click _Auto captions_.** Phonon-2 transcribes only what's on your timeline, on your own CPU.
 3. **Click _Cut retakes_ and _Remove silences_.** False starts and dead air are gone.
 4. **Pick a caption style.** Word-by-word highlights, boxes, karaoke, one word at a time. Drag it where you want.
 5. **Delete words in the transcript** to cut them from the video, like editing a doc.
@@ -123,7 +123,7 @@ The setup script:
 - builds the UI
 - installs the `shorts` command, plus a background service on Linux, `~/Applications/Shorts.command` on macOS, or a Start Menu shortcut on Windows
 
-The Whisper model (about 500 MB) downloads on your first transcription. Add `--no-vision` (`-NoVision` on Windows) to skip auto reframe and background replacement and save about 400 MB.
+The Phonon-2 speech model (about 170 MB) downloads on your first transcription. Add `--no-vision` (`-NoVision` on Windows) to skip auto reframe and background replacement and save about 400 MB.
 
 ## Use
 
@@ -170,20 +170,20 @@ Transcription, rendering and the editor all run on your computer. No accounts, n
 `config.json` lets you change:
 - the folders shown in the media browser (`library_dirs`)
 - `upload_dir` and `export_dir`
-- the Whisper `model` and `language`
-- `vocabulary` (names Whisper should know)
+- the transcription `model` and `language`
+- `vocabulary` (comma-separated names and terms the model should know)
 - encoder settings
 
 ## FAQ
 
 **Does it work in my language?**
-Yes. Set `"model": "small"` (multilingual) and your `"language"` (for example `"pt"` or `"es"`) in `config.json`. The default `small.en` is the most accurate choice for English.
+Yes. Set your `"language"` (for example `"pt"` or `"es"`) in `config.json`. English uses Phonon-2 (the default `"model"`), which is fast and accurate. Other languages use Whisper's multilingual `small` model, or any Whisper model you set as `"model"`.
 
 **Do I need a GPU?**
 No. Everything runs on the CPU, and it was built on an 8 GB laptop. Previews use lightweight proxies, heavy jobs run one at a time at low priority, and on Linux the service is memory-capped. Intel GPUs speed up exports on Linux.
 
 **Is it really offline?**
-After setup, yes. The only downloads are the Whisper model on first use and the models and fonts during setup.
+After setup, yes. The only downloads are the speech model on first use and the models and fonts during setup.
 
 **Which platforms are tested?**
 Linux is the daily driver. CI runs the setup scripts and an export on Linux, macOS and Windows on every push. Bug reports from macOS and Windows are very welcome.
@@ -196,7 +196,7 @@ web/            React + Tailwind + Radix UI, built into static/app
                 caption/text renderer, keyframes (plain JS)
 server.py       stdlib HTTP server on 127.0.0.1: media registry, background worker
                 (proxies, filmstrips, waveforms, transcripts), projects, export via ffmpeg
-transcribe.py   faster-whisper on CPU + energy-based word boundary refinement
+transcribe.py   Phonon-2 (or faster-whisper) on CPU + energy-based word boundary refinement
 vision.py       MediaPipe face tracking and person segmentation (CPU)
 ```
 
@@ -213,4 +213,4 @@ If Shorts saves you from a Linux editing headache, a ⭐ helps other people find
 
 [MIT](LICENSE) © Mário Rodrigues. Made to edit the videos for [IdealJob](https://idealjob.app).
 
-Built with [faster-whisper](https://github.com/SYSTRAN/faster-whisper), [MediaPipe](https://github.com/google-ai-edge/mediapipe), [FFmpeg](https://ffmpeg.org), [React](https://react.dev), [Tailwind CSS](https://tailwindcss.com), [Radix UI](https://www.radix-ui.com) and [Phosphor Icons](https://phosphoricons.com). Caption fonts from [Google Fonts](https://fonts.google.com) (SIL Open Font License).
+Built with [Phonon-2](https://huggingface.co/FermionResearch/Phonon-2) by Fermion Research (CC BY 4.0), [faster-whisper](https://github.com/SYSTRAN/faster-whisper), [MediaPipe](https://github.com/google-ai-edge/mediapipe), [FFmpeg](https://ffmpeg.org), [React](https://react.dev), [Tailwind CSS](https://tailwindcss.com), [Radix UI](https://www.radix-ui.com) and [Phosphor Icons](https://phosphoricons.com). Caption fonts from [Google Fonts](https://fonts.google.com) (SIL Open Font License).

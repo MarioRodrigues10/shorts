@@ -49,24 +49,26 @@ if [ ${#missing[@]} -gt 0 ]; then
   exit 1
 fi
 
-# ---- Python environments (3.12: wheels exist for faster-whisper and mediapipe) ----
-mkvenv() { # dir requirements  (installs run at low priority: they're heavy on small laptops)
+# ---- Python environments (3.12: wheels exist for faster-whisper, Phonon-2 and mediapipe) ----
+mkvenv() { # dir pip-args...  (installs run at low priority: they're heavy on small laptops)
   if have uv; then
     [ -x "$1/bin/python" ] || uv venv --python 3.12 "$1"
-    nice -n 10 uv pip install --python "$1/bin/python" -r "$2"
+    nice -n 10 uv pip install --python "$1/bin/python" "${@:2}"
   else
     v=$(python3 -c 'import sys; print("%d%02d" % sys.version_info[:2])')
     [ "$v" -ge 310 ] && [ "$v" -le 312 ] || die "Python 3.10-3.12 needed (found $(python3 -V)); install uv and re-run"
     [ -x "$1/bin/python" ] || python3 -m venv "$1"
-    nice -n 10 "$1/bin/pip" install -q -r "$2"
+    nice -n 10 "$1/bin/pip" install -q "${@:2}"
   fi
 }
 say "Transcription environment (.venv)"
-mkvenv .venv requirements.txt
+# Linux: CPU-only torch for Phonon-2 (the default wheel adds ~3 GB of CUDA libraries the app never uses)
+[ "$OS" = Linux ] && mkvenv .venv torch --index-url https://download.pytorch.org/whl/cpu
+mkvenv .venv -r requirements.txt
 
 if [ "$VISION" = 1 ]; then
   say "Vision environment (.venv-vision): auto reframe and background replacement"
-  mkvenv .venv-vision requirements-vision.txt
+  mkvenv .venv-vision -r requirements-vision.txt
   mkdir -p models
   base=https://storage.googleapis.com/mediapipe-models
   [ -s models/face.tflite ] || curl -fsSLo models/face.tflite "$base/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite"

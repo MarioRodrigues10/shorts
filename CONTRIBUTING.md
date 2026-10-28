@@ -30,7 +30,7 @@ XDG_DATA_HOME=/tmp/ss/data XDG_CONFIG_HOME=/tmp/ss/config SHORTS_PORT=7378 pytho
 | Path | What |
 |---|---|
 | `server.py` | HTTP server (stdlib only): media registry, background jobs, projects, export |
-| `transcribe.py` | faster-whisper transcription with word-timing refinement |
+| `transcribe.py` | Phonon-2 / faster-whisper transcription with word-timing refinement |
 | `breaths.py` | Finds breaths between words for "Lower breaths" |
 | `vision.py` | MediaPipe face tracking and background segmentation |
 | `web/src/core/` | The editing engine: project model, timeline, player, caption renderer, keyframes. Plain JS, no React |

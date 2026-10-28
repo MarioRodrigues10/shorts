@@ -102,10 +102,12 @@ DEFAULT_CONFIG = {
     "upload_dir": "~/Videos/Shorts/Media",     # imported / dropped files are copied here
     "export_dir": "~/Videos/Shorts/Exports",   # finished videos
     "language": "en",
-    "model": "small.en",
+    # phonon-2 (English) or a Whisper model such as "small" for other languages
+    # (phonon-2 falls back to "small" when "language" isn't "en").
+    "model": "phonon-2",
     "transcribe_threads": 4,
-    # Whisper prompt. Helps with names but can make Whisper drop repeated
-    # phrases (retakes), so it is empty by default.
+    # Comma-separated names and terms (Phonon-2 favours up to 25). With Whisper
+    # it's a prompt, which can make it drop repeated phrases (retakes).
     "vocabulary": "",
     "encoder": "auto",  # auto (Intel VAAPI if it works, else x264) | vaapi | x264
     "vaapi_device": "auto",
@@ -518,7 +520,7 @@ def worker():
         with MEDIA_LOCK:
             QUEUED.discard((mid, task))
         CURRENT.update(task={"media": mid, "task": task}, progress=0.0, message=task)
-        # Whisper (~0.9 GB) never runs alongside an export or vision job (up to ~0.9 GB each):
+        # Transcription (~1 GB) never runs alongside an export or vision job (up to ~0.9 GB each):
         # one heavy job at a time. Proxies, filmstrips and waveforms are light and don't wait.
         heavy, held = task == "transcript", False
         try:
@@ -682,7 +684,9 @@ def task_transcript(m, opts):
         cmd += ["--prompt", CONFIG["vocabulary"]]
     env = dict(os.environ)
     hub = HOME / ".cache/huggingface/hub"
-    if any(hub.glob(f"models--*{model.replace('.', '*')}*")):
+    fermion = HOME / ".cache/fermion/speech"  # Phonon models unpack here
+    if any(hub.glob(f"models--*{model.replace('.', '*')}*")) or (
+            fermion.is_dir() and any(model.lower() in p.name.lower() for p in fermion.iterdir())):
         env["HF_HUB_OFFLINE"] = "1"  # model is cached: fully offline, no network check
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env, **LOW_FLAGS)
     err = []

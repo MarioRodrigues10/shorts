@@ -31,7 +31,7 @@ foreach ($n in $need) {
   if (-not (Have $n.Cmd)) { throw "$($n.Name) was installed but isn't on PATH yet. Open a new PowerShell window and re-run this script." }
 }
 
-# ---- Python environments (3.12: wheels exist for faster-whisper and mediapipe) ----
+# ---- Python environments (3.12: wheels exist for faster-whisper, Phonon-2 and mediapipe) ----
 function New-Venv($dir, $req) {
   if (-not (Test-Path "$dir\Scripts\python.exe")) { uv venv --python 3.12 $dir; if ($LASTEXITCODE) { throw "uv venv failed" } }
   uv pip install --python "$dir\Scripts\python.exe" -r $req

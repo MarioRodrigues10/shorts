@@ -100,8 +100,8 @@ export default function CaptionsPanel() {
 
       {mains.length > 0 && (
         <Section title="Accuracy">
-          <p className="mb-2 text-xs text-subtle">Fix single words in Transcript. The larger model is about 4× slower.</p>
-          <Button className="w-full justify-center" onClick={() => A.autoCaptions({ model: "distil-large-v3", force: true })} disabled={busy}>Re-transcribe with large model</Button>
+          <p className="mb-2 text-xs text-subtle">Fix single words in Transcript. Whisper large is a second opinion, over 10× slower.</p>
+          <Button className="w-full justify-center" onClick={() => A.autoCaptions({ model: "distil-large-v3", force: true })} disabled={busy}>Re-transcribe with Whisper large</Button>
         </Section>
       )}
     </div>
