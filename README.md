@@ -13,7 +13,7 @@ Auto captions · edit by deleting words · one-click silence and retake removal 
 ![Linux · macOS · Windows](https://img.shields.io/badge/runs%20on-Linux%20·%20macOS%20·%20Windows-1e9baa)
 ![100% local](https://img.shields.io/badge/cloud-none.%20100%25%20local-1c1917)
 
-[Install](#install) · [Features](#features) · [Why](#why-i-built-it) · [FAQ](#faq)
+[Install](#install) · [Features](#features) · [Let Claude edit it](#or-let-claude-edit-it) · [Why](#why-i-built-it) · [FAQ](#faq)
 
 <br>
 
@@ -31,6 +31,48 @@ Auto captions · edit by deleting words · one-click silence and retake removal 
 4. **Pick a caption style.** Word-by-word highlights, boxes, karaoke, one word at a time. Drag it where you want.
 5. **Delete words in the transcript** to cut them from the video, like editing a doc.
 6. **Export.** 1080×1920 H.264 at −14 LUFS, plus `.srt` captions and a `.txt` transcript for your post.
+
+## Or let Claude edit it
+
+<img src="docs/mascot/shorty-ears.svg" alt="Shorty listening with headphones" width="150" align="right">
+
+Shorts ships with a [Claude Code](https://claude.com/claude-code) skill that turns a raw take into a finished short, then checks its own work by listening to it. Open Claude Code in this folder and ask:
+
+```text
+> Make a Reel from ~/Videos/raw/take-12.mp4. Keep my points, lose the breaths.
+```
+
+1. **It edits the script with you.** Fillers, stutters, retakes and dead sign-offs go. Anything that carries meaning is listed for your OK first, along with a suggested hook for the first three seconds.
+2. **It cuts on the sound, not the transcript.** Each cut sits on where your voice actually starts and stops. Breaths leave with the pause they're in, and the sliver kept as breathing room is turned down to near silence. Word endings like *-ch* and *-st* are never clipped, and no clip is so short it feels choppy.
+3. **It checks every cut by ear.** Each joint is played back and re-transcribed. A cut that clips a word, or lets a removed word leak back in, gets moved until it sounds right.
+4. **It adds the polish real editors use.** Captions in white with one accent colour. Punch-ins that keep your eyes in the same spot. Full-colour logos as stickers that pop in on the word you say them. One consistent card style. Sound effects levelled under your voice.
+5. **It exports on a throwaway copy of Shorts and verifies the result.** Every word captioned, no audible breaths, −14 LUFS, and a list of the cuts that still sound edited. You get the file next to your exports, a new project in your app, and a short report of what to listen to.
+
+**What the ears listen for** (`listen.py`, at every cut and sound effect):
+
+| | Flags |
+|---|---|
+| Click | an un-faded edit: a jump in the waveform |
+| Level and pitch | your voice suddenly louder, quieter, higher or lower across a cut |
+| Tone | the sound changing colour across a cut |
+| Breathing room | words colliding with no pause, or dead air |
+| Breath | a breath left near a cut |
+| Effects | a pop or whoosh too loud or too quiet for your voice (editors keep them about 6 to 10 dB under) |
+
+**Teach it your taste.** `listen.py … --page` builds a listening page of three-second clips with *Sounds fine* and *Sounds edited* buttons. Rate a few, run `listen.py --calibrate ratings.json`, and from then on it ranks cuts the way you hear them. Put your channel's preferences (brand logos, colours, words the transcriber gets wrong for your voice) in `~/.config/shorts-studio/edit-notes.md` and the skill follows them.
+
+**It never touches your work.** It edits a private copy of your clip (a hardlink, so no extra disk space) and renders on a separate Shorts instance. Your projects, transcripts and exports stay as they are.
+
+<details>
+<summary>Setup and the full workflow</summary>
+
+<br>
+
+- The skill lives in [`.claude/skills/shorts-edit`](.claude/skills/shorts-edit/SKILL.md). Claude Code loads it automatically in this folder. To use it from anywhere: `ln -s "$PWD/.claude/skills/shorts-edit" ~/.claude/skills/`.
+- Exports are driven in a headless browser: `python3 -m pip install playwright pillow && python3 -m playwright install firefox`.
+- Each step is a plain script you can run yourself: `breathmap.py` (breaths vs *sh*/*ch*/*s*), `cutplan.py` (cut plan), `joints.py` (ear check), `shortslib.py` (build the project), `export.py`, `verify.py` (words, breaths, loudness) and `listen.py` (the ears). The full playbook is in [`SKILL.md`](.claude/skills/shorts-edit/SKILL.md), and the editing sources behind every number are in [`references/style.md`](.claude/skills/shorts-edit/references/style.md).
+
+</details>
 
 ## Why I built it
 
@@ -69,6 +111,7 @@ So I built my own: the editing flow I liked in CapCut, running natively on Linux
 - **Auto captions** transcribe only the parts of your videos that are on the timeline, and only the new parts after you edit.
 - **Transcript editing:** delete words to cut them, fix misheard words, highlight words for captions.
 - One-click **Remove silences**, **Cut retakes** (false starts), **Cut fillers** (um, uh) and **Punch-in** (alternating zoom on cuts).
+- **[Claude Code skill](#or-let-claude-edit-it)**: a full edit from one prompt, with breath-aware cuts that are checked by ear.
 
 **Captions and graphics**
 - 7 caption styles (word highlight, box, one word, karaoke…) with full control over font, colors, outline, shadow and animation. Drag them on the canvas.
@@ -151,14 +194,17 @@ Press `?` in the editor for every shortcut. The essentials:
 <img src="docs/mascot/shorty-wave.svg" alt="Shorty waving" height="130">
 <img src="docs/mascot/shorty-listen.svg" alt="Shorty listening" height="130">
 <img src="docs/mascot/shorty-celebrate.svg" alt="Shorty celebrating" height="130">
+<img src="docs/mascot/shorty-ears.svg" alt="Shorty listening with headphones" height="130">
 <img src="docs/mascot/shorty-sleep.svg" alt="Shorty sleeping" height="130">
 </p>
 
-Shorty keeps you company in the app: listening while it transcribes, celebrating when your video is ready, and napping when there's nothing to edit yet. It's a clapperboard with scissors, because editing is mostly cutting. Every pose is plain SVG generated by [`docs/mascot/build.py`](docs/mascot/build.py).
+Shorty keeps you company in the app: listening while it transcribes, celebrating when your video is ready, and napping when there's nothing to edit yet. With headphones on, it's the face of the Claude skill that listens to your cuts. It's a clapperboard with scissors, because editing is mostly cutting. Every pose is plain SVG generated by [`docs/mascot/build.py`](docs/mascot/build.py).
 
 ## Your data stays yours
 
 Transcription, rendering and the editor all run on your computer. No accounts, no uploads, no API keys, no telemetry.
+
+The [Claude Code skill](#or-let-claude-edit-it) is optional. If you use it, Claude reads your transcript and a few frame grabs through Claude Code to make its decisions. The audio analysis, rendering and exports still run on your machine.
 
 | What | Where |
 |---|---|
@@ -198,6 +244,8 @@ server.py       stdlib HTTP server on 127.0.0.1: media registry, background work
                 (proxies, filmstrips, waveforms, transcripts), projects, export via ffmpeg
 transcribe.py   Phonon-2 (or faster-whisper) on CPU + energy-based word boundary refinement
 vision.py       MediaPipe face tracking and person segmentation (CPU)
+.claude/skills/shorts-edit/
+                the Claude Code editing skill: cut planner, ear checks, project builder
 ```
 
 - **Preview and export match.** The same JavaScript draws captions and text in the preview and in the export. The browser renders the caption layer and the server composites it.

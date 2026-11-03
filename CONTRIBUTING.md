@@ -38,6 +38,7 @@ XDG_DATA_HOME=/tmp/ss/data XDG_CONFIG_HOME=/tmp/ss/config SHORTS_PORT=7378 pytho
 | `web/test/` | Unit tests for the engine (`bun test`) |
 | `docs/mascot/build.py` | Generates Shorty, the mascot, as SVG |
 | `scripts/demo/` | Re-records the README demo with a synthetic clip |
+| `.claude/skills/shorts-edit/` | The Claude Code editing skill: `SKILL.md` (the playbook) and its scripts (cut planner, ear checks, project builder). Run them with `.venv/bin/python` |
 
 A few rules the code relies on:
 

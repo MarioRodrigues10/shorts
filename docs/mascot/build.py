@@ -110,6 +110,16 @@ ZZZ = (f'<g fill="{C["line"]}" font-family="Montserrat, Arial, sans-serif" font-
        '<text x="290" y="126" font-size="36">z</text><text x="322" y="92" font-size="27">z</text><text x="346" y="64" font-size="20">z</text></g>')
 WAVE_MARKS = (f'<g fill="none" stroke="{C["line"]}" stroke-width="6" stroke-linecap="round">'
               '<path d="M30 176 Q22 190 28 204"/><path d="M44 160 Q38 168 40 176"/></g>')
+# headphones (the "ears" pose): band over the clapper, teal cups on the sides, sound waves
+HEADPHONES = (f'<path d="M96 246 C80 92 320 92 304 246" fill="none" stroke="{C["line"]}" stroke-width="22" stroke-linecap="round"/>'
+              f'<path d="M96 246 C80 92 320 92 304 246" fill="none" stroke="{C["grip"]}" stroke-width="9" stroke-linecap="round"/>'
+              + "".join(f'<rect x="{x}" y="196" width="38" height="74" rx="17" fill="{C["grip"]}" stroke="{C["line"]}" stroke-width="{W}"/>'
+                        f'<rect x="{x + 9}" y="210" width="9" height="34" rx="4.5" fill="{C["bg2"]}"/>' for x in (66, 296)))
+SOUND = (f'<g fill="none" stroke="{C["grip"]}" stroke-width="8" stroke-linecap="round">'
+         '<path d="M30 206 Q18 232 30 258"/><path d="M12 190 Q-6 232 12 274"/>'
+         '<path d="M370 206 Q382 232 370 258"/><path d="M388 190 Q406 232 388 274"/></g>')
+EYES_BLISS = (f'<g fill="none" stroke="{C["line"]}" stroke-width="8" stroke-linecap="round">'
+              '<path d="M160 226 Q172 214 184 226"/><path d="M216 226 Q228 214 240 226"/></g>')
 
 
 def figure(*parts, tilt=-6):
@@ -134,6 +144,7 @@ POSES = {
     "wave": svg("Shorty waving", SHADOW, figure(LEGS, ARM_R_REST, clapper_band(), clapper_arm(), ARM_L_WAVE, WAVE_MARKS, BROWS_UP, eyes(), GRIN)),
     "celebrate": svg("Shorty celebrating", CONFETTI, SHADOW, figure(LEGS, clapper_band(), clapper_arm(-26), ARM_L_UP, ARM_R_UP, EYES_JOY, GRIN, tilt=0)),
     "listen": svg("Shorty listening", SHADOW, figure(LEGS, ARM_L_REST, ARM_R_REST, clapper_band(), clapper_arm(-10), BROWS_UP, eyes(4, -2, 30), OPEN_O, tilt=4), BUBBLE),
+    "ears": svg("Shorty listening with headphones", SOUND, SHADOW, figure(LEGS, ARM_L_REST, clapper_band(), clapper_arm(-8), EYES_BLISS, SMIRK, ARM_R_SCISSORS, HEADPHONES, tilt=2)),
     "sleep": svg("Shorty sleeping", SHADOW, figure(LEGS, ARM_L_REST, ARM_R_REST, clapper_band(), clapper_arm(-4), EYES_SLEEP, SNOOZE_MOUTH, tilt=-3), ZZZ),
 }
 
