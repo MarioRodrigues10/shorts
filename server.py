@@ -1088,7 +1088,7 @@ def _cache_out(key_obj):
 
 BREATH_GAIN = 10 ** (-24 / 20)  # "Lower breaths": -24 dB, with 30 ms ramps
 BREATH_RAMP = 0.03
-BREATHS_V = 3  # breaths.py output version; older detections are recomputed
+BREATHS_V = 4  # breaths.py output version; older detections are recomputed
 EDGE = 0.12    # a breath fragment this close to a cut is the leftover of a breath
 
 

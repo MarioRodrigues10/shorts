@@ -2,14 +2,18 @@
 """Find breaths, so they can be lowered without changing the timing.
 
 Usage: breaths.py INPUT WORDS.json OUTPUT.json
-Runs in .venv (numpy). Writes {"version": 3, "breaths": [[start, end], ...], "fragments": [...]}
+Runs in .venv (numpy). Writes {"version": 4, "breaths": [[start, end], ...], "fragments": [...]}
 in source seconds. Fragments are shorter breathy bits (from 40 ms); they are only lowered where they
 touch a cut, because inside a clip they are usually part of a word, while at a cut they are the
 leftover tail or start of a breath.
 
 A breath is unvoiced, noise-like sound (high zero-crossing rate), quieter than speech and louder
 than the room, whose energy sits low (mostly below 4 kHz). That last test separates it from
-"s"/"sh"/"f", which are just as noisy but put most of their energy above 4 kHz. Whisper often
+"s"/"s"/"f", which are just as noisy but put most of their energy above 4 kHz. "sh"/"ch" sit lower
+(2-5 kHz) and pass that test, so every finished range is checked once more over its whole
+length: 70%+ of its energy in 2-5 kHz is a "sh"/"ch"/"s" (inhales: 28-60%), 50%+ below 1 kHz
+is voiced (inhales: 3-40%). Without it "Lower breaths" turned "shifting", "cheaper", "rich"
+down by 15-22 dB. Whisper often
 stretches a word over the inhale before or after it, so word boundaries are only used for the
 speech/room levels, never to decide where a breath can be.
 """
@@ -26,6 +30,19 @@ def load_audio(path):
     raw = subprocess.run(["ffmpeg", "-v", "quiet", "-i", path, "-map", "0:a:0", "-ac", "1", "-ar", str(SR),
                           "-f", "s16le", "-"], capture_output=True, check=True).stdout
     return np.frombuffer(raw, np.int16).astype(np.float32) / 32768
+
+
+def band_share(audio, s, e, lo, hi):
+    x = audio[int(s * SR): int(e * SR)]
+    if len(x) < 32:
+        return 0.0
+    sp = np.abs(np.fft.rfft(x * np.hanning(len(x)))) ** 2
+    f = np.fft.rfftfreq(len(x), 1 / SR)
+    return float(sp[(f >= lo) & (f < hi)].sum() / (sp.sum() + 1e-12))
+
+
+def is_breath(audio, s, e):
+    return band_share(audio, s, e, 2000, 5000) <= 0.70 and band_share(audio, s, e, 0, 1000) <= 0.50
 
 
 def detect(audio, words):
@@ -70,14 +87,14 @@ def detect(audio, words):
                 hi += 1
             out.append([round(max(lo * F, a * F - 0.03), 3), round(min(hi * F, b * F + 0.03), 3)])
         run, hole = [], 0
-    return out, frags
+    return ([r for r in out if is_breath(audio, *r)], [r for r in frags if is_breath(audio, *r)])
 
 
 def main():
     src, words_path, out_path = sys.argv[1:4]
     words = json.load(open(words_path)).get("words", [])
     breaths, frags = detect(load_audio(src), words) if words else ([], [])
-    json.dump({"version": 3, "breaths": breaths, "fragments": frags}, open(out_path, "w"))
+    json.dump({"version": 4, "breaths": breaths, "fragments": frags}, open(out_path, "w"))
 
 
 if __name__ == "__main__":
