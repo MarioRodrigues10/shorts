@@ -1335,8 +1335,14 @@ def overlay_clip_chain(o, m, W, H, idx, fps=30):
     ks = None if o.get("cover") and not o.get("phone") else overlay_kf(o, "scale", float(o.get("scale", 0.6)))
     if ks:
         k = ks.replace("T", "t")
+        # Pad to the largest size the keyframes reach: every later link then has one frame size.
+        # Without it, the format converter ffmpeg inserts before the final overlay is configured
+        # from the first frame and squeezes every later frame back to that size, so the export
+        # froze at the first keyframe's scale while the preview animated.
+        kmax = max([float(o.get("scale", 0.6))] + [float(x["v"]) for x in (o.get("kf") or {}).get("scale") or []])
+        pw, ph = even(sw * (W / sw) * kmax) + 2, even(sh * (W / sw) * kmax) + 2
         f += (f",scale=w='2*ceil({sw}*({W}/{sw})*{k}/2)':h='2*ceil({sh}*({W}/{sw})*{k}/2)':eval=frame:"
-              f"flags={SCALE_FLAGS},format=rgba")
+              f"flags={SCALE_FLAGS},format=rgba,pad=w={pw}:h={ph}:x='(ow-iw)/2':y='(oh-ih)/2':color=black@0:eval=frame")
     kop = overlay_kf(o, "opacity", float(o.get("opacity", 1)))
     if kop:
         f += f",geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*clip({kop},0,1)'"
