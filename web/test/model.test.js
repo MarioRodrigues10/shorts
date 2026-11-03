@@ -108,6 +108,13 @@ describe("speech tools", () => {
     expect(M.findRetakes(w)).toEqual([]);
   });
 
+  test("a word edited to empty text is hidden from the captions, without leaving a gap", () => {
+    const p = project([clip("a", 0, 2)]);
+    const w = tl([["on", 0, 0.2], ["Ideal", 0.2, 0.5], ["", 0.5, 0.8], ["was", 0.8, 1.0]]);
+    const g = M.captionGroups(p, w);
+    expect(g.flatMap((x) => x.words.map((y) => y.text))).toEqual(["on", "Ideal", "was"]);
+  });
+
   test("filler detection", () => {
     expect(["um", "Uhh,", "hmm"].every((t) => M.isFiller({ text: t }))).toBe(true);
     expect(["umbrella", "a", "hum"].some((t) => M.isFiller({ text: t }))).toBe(false);

@@ -470,7 +470,8 @@ export function timelineWords(p, wordsOf) {
 
 export function captionGroups(p, words) {
   const cap = p.captions || defaultCaptions();
-  return buildGroups(words.filter((w) => w.oe - w.os > 0.01), cap);
+  // a word edited to "" is hidden from the captions (no empty slot or double space left behind)
+  return buildGroups(words.filter((w) => w.oe - w.os > 0.01 && String(w.text).trim() !== ""), cap);
 }
 
 export function editWord(p, w, patch) {
