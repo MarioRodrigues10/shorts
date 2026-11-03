@@ -61,7 +61,9 @@ default-style.json
 .env.*
 *.pem
 *.key
-.claude/
+# Claude Code: local settings stay out, the shared skills (.claude/skills) ship with the repo
+.claude/*
+!.claude/skills/
 
 # ---- editors / OS
 .idea/
