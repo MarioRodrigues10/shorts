@@ -1734,12 +1734,20 @@ def browse(dirpath=None):
 
 
 def recent_recordings(limit=24):
-    """Newest video files across the library folders (top level only)."""
+    """Newest video files across the library folders: their top level, plus month folders
+    (YYYY-MM or YYYY/MM) inside them, so footage sorted by month still shows up."""
     seen, out = set(), []
+    dirs = []
     for d in CONFIG["library_dirs"]:
         p = expand(d)
         if not p.is_dir():
             continue
+        dirs.append(p)
+        months = sorted((c for c in p.iterdir() if c.is_dir() and re.fullmatch(r"\d{4}-\d{2}", c.name)), reverse=True)
+        for y in (c for c in p.iterdir() if c.is_dir() and re.fullmatch(r"\d{4}", c.name)):
+            months += [m for m in y.iterdir() if m.is_dir() and re.fullmatch(r"\d{2}", m.name)]
+        dirs += sorted(months, key=lambda m: str(m)[-7:].replace("/", "-"), reverse=True)[:3]
+    for p in dirs:
         for it in browse(str(p))["items"]:
             if it["kind"] != "video" or it["path"] in seen:
                 continue
