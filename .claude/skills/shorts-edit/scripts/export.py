@@ -2,7 +2,7 @@
 """Export a project by driving the Shorts UI in headless Firefox (export is browser-assisted:
 the page renders captions/text to PNG frames, the server composes).
 
-Usage: export.py PROJECT_ID [--port 7378] [--shot DIR]
+Usage: export.py PROJECT_ID [--port 7378] [--shot DIR] [--timeout SECONDS (default 3600)]
 Waits for any other ffmpeg first (one heavy job at a time; you may be exporting in the app).
 Prints the export time. Output lands in the instance's export_dir as "<name>.mp4".
 """
@@ -52,6 +52,7 @@ with sync_playwright() as p:
     wait(pg, 1.5)
     pg.locator("[role=dialog] button:has-text('Export')").click()
     t0 = time.time()
-    until(pg, "document.body.innerText.includes('Ready to post')")
+    # long videos: the final pass of a 6-minute 1080p edit takes ~20 min on a laptop CPU/iGPU
+    until(pg, "document.body.innerText.includes('Ready to post')", timeout=int(sys.argv[sys.argv.index("--timeout") + 1]) if "--timeout" in sys.argv else 3600)
     print(f"exported in {time.time() - t0:.0f}s; page errors: {errs}")
     b.close()

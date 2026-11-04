@@ -91,8 +91,40 @@ def make_edit_media(api_base, src_mid, label, data_dir=None):
     return mid
 
 
+def glossary_edits(words, glossary_md):
+    """word_edits from a glossary note: a fenced ```glossary block of "heard -> fix" lines.
+    A multi-word match puts the fix on its first word and hides the others; trailing punctuation
+    of the last matched word is kept ("open ai," -> "OpenAI,")."""
+    import re
+    text = Path(glossary_md).expanduser().read_text()
+    m = re.search(r"```glossary\n(.*?)```", text, re.S)
+    rules = []
+    for line in (m.group(1).splitlines() if m else []):
+        if "->" in line:
+            a, b = (x.strip() for x in line.split("->", 1))
+            if a and b:
+                rules.append((a.lower().split(), b))
+    rules.sort(key=lambda r: -len(r[0]))  # longest match first
+    norm = lambda t: re.sub(r"[^a-z0-9/'-]+", "", t.lower())
+    ws = list(words)
+    edits, i = {}, 0
+    while i < len(ws):
+        for pat, fix in rules:
+            if [norm(w["text"]) for w in ws[i:i + len(pat)]] == pat:
+                tail = re.search(r"[.,!?;:]+$", ws[i + len(pat) - 1]["text"])
+                edits[ws[i]["id"]] = {"text": fix + (tail.group(0) if tail else "")}
+                for w in ws[i + 1:i + len(pat)]:
+                    edits[w["id"]] = {"text": ""}
+                i += len(pat)
+                break
+        else:
+            i += 1
+    return edits
+
+
 class Edit:
-    def __init__(self, api, mid, plan, name, data_dir=None):
+    def __init__(self, api, mid, plan, name, data_dir=None, canvas=(1080, 1920)):
+        self.canvas = canvas  # (1920, 1080) for YouTube long-form
         self.api, self.mid, self.name = api.rstrip("/"), mid, name
         self.data = Path(data_dir or DEFAULT_DATA)
         p = json.load(open(plan))
@@ -206,21 +238,58 @@ class Edit:
         self.overlays.append(o)
         return o
 
-    def card(self, text, start, end, y=0.13, size=60):
-        """The one card style (white rounded box, black Montserrat 900, sentence case, slide in).
-        One type size across the video; at most 2 lines."""
-        return self.title(text, start, end, preset="title-box", size=size, y=y, anim="slide")
+    def text_width(self, text, size, font="Montserrat", weight=900, pad=0.6):
+        """Width of a text clip as a fraction of the canvas: measured with the same font file
+        Shorts draws with (+ the box padding), capped at its 0.86 wrap width."""
+        def estimate(line):  # Montserrat Black advance widths, as a fraction of the font size
+            return sum(0.30 if c == " " else 0.32 if c in ".,:;'!|·" else 0.74 if c.isupper() or c.isdigit()
+                       else 0.85 if c in "mwMW" else 0.62 for c in line) * size
+        try:
+            from PIL import ImageFont
+            ft = ImageFont.truetype(str(Path(__file__).resolve().parents[4] / "static/fonts" / f"{font}.ttf"), int(size))
+            try:
+                ft.set_variation_by_axes([weight])
+            except Exception:
+                pass
+            measure = ft.getlength
+        except (ImportError, OSError):
+            measure = estimate
+        w = max(measure(line) for line in text.split("\n")) + pad * size
+        return min(w / self.canvas[0], 0.86)
 
-    def number(self, big, label, start, end, y=0.17, accent="#FFD23F"):
+    def fit_x(self, t, x=None, align="left", margin=0.035):
+        """Place a text clip so it never leaves the frame: left-aligned at the margin (cards on
+        a 16:9 canvas), or centred at x but pushed inside the frame."""
+        st = t["style"]
+        w = self.text_width(t["text"], st["size"], st.get("font", "Montserrat"), st.get("weight", 900))
+        if align == "left":
+            t["x"] = round(margin + w / 2, 4)
+        else:
+            cx = t["x"] if x is None else x
+            t["x"] = round(min(max(cx, margin + w / 2), 1 - margin - w / 2), 4)
+        return t
+
+    def card(self, text, start, end, y=0.13, size=60, align="center", x=None):
+        """The one card style (white rounded box, black Montserrat 900, sentence case, slide in).
+        One type size across the video; at most 2 lines. align="left" pins it to the left margin
+        (16:9 chapter cards); centred cards are pushed inside the frame if they'd overflow."""
+        t = self.title(text, start, end, preset="title-box", size=size, y=y, anim="slide")
+        return self.fit_x(t, x, align)
+
+    def number(self, big, label, start, end, y=0.17, accent="#FFD23F", x=None):
         """Key-number callout: the number in the accent colour, a white label under it."""
         st = dict(TEXT_PRESETS["classic"], font="Montserrat", weight=900, size=210, color=accent, stroke=0, shadow=24)
         lab = dict(TEXT_PRESETS["classic"], font="Montserrat", weight=800, size=58, stroke=0, shadow=20)
         a = self.title(big, start, end, y=y, anim="slide")
         a["style"] = dict(st, maxWidth=0.86, lineHeight=1.0)
+        if x is not None:
+            self.fit_x(a, x, "center")
         if not label:  # when the captions already say it, the number alone is cleaner
             return a, None
         b = self.title(label, start + 0.1, end, y=y + 0.085, anim="slide")
         b["style"] = dict(lab, maxWidth=0.86, lineHeight=1.1)
+        if x is not None:
+            b["x"] = a["x"]
         return a, b
 
     def whoosh_into(self, t, name="Whoosh", peak=0.35, volume=0.9):
@@ -271,7 +340,7 @@ class Edit:
                    for i, r in enumerate(self._rows(self.texts, lambda c: c["dur"]))]
         tracks += [{"id": uid(), "kind": "audio", "clips": r, "name": f"Audio {i + 1}"}
                    for i, r in enumerate(self._rows(self.sfx, vlen))]
-        return {"version": 2, "id": pid, "name": self.name, "canvas": {"w": 1080, "h": 1920, "fps": 30, "bg": "blur"},
+        return {"version": 2, "id": pid, "name": self.name, "canvas": {"w": self.canvas[0], "h": self.canvas[1], "fps": 30, "bg": "blur"},
                 "media": [self.mid] + sorted(set(self.media_ids.values())), "tracks": tracks, "captions": captions,
                 "wordEdits": {self.mid: {str(k): v for k, v in word_edits.items()}},
                 # breaths: Shorts dips every breath left inside a clip by 24 dB. On by default.
@@ -310,7 +379,8 @@ class Edit:
             print(f"CAPTIONS: {len(missing)} kept words won't show: {[self.words[i]['text'] for _, i in missing]}")
         return missing
 
-    def save(self, base_captions_from=None, caption_size=None, word_edits=None, captions=None, audio=None, pid=None):
+    def save(self, base_captions_from=None, caption_size=None, word_edits=None, captions=None, audio=None, pid=None,
+             glossary=None):
         if captions is None:
             if base_captions_from:  # path to a project .json whose caption style to reuse
                 captions = json.load(open(Path(base_captions_from).expanduser()))["captions"]
@@ -318,6 +388,9 @@ class Edit:
                 captions = {"enabled": True, "preset": "bold-pop"}
         if caption_size:
             captions = dict(captions, size=caption_size)
+        if glossary:  # the user's glossary first, explicit word_edits win
+            ws = sorted(self.words.values(), key=lambda w: w["start"])
+            word_edits = dict(glossary_edits(ws, glossary), **(word_edits or {}))
         self.check_captions(self.plan_clips, fix=self.media_is_copy)
         pid = pid or api(self.api, "/api/projects", {"name": self.name})["id"]
         p = self.project(pid, captions, word_edits or {}, audio)

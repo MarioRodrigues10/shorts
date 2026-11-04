@@ -14,8 +14,11 @@ Scripts are in `scripts/` next to this file. Run the Python ones with the Shorts
 and the transcriber. `references/style.md` has the sources behind every style number.
 
 **First, read `~/.config/shorts-studio/edit-notes.md` if it exists**: the user's own channel,
-brand assets, voice quirks and taste. It overrides the defaults below. When the user tells you
-a preference worth keeping, offer to add it there.
+brand assets, voice quirks and taste. It overrides the defaults below. It may point to a
+**brain** (a Markdown/Obsidian vault): read its README, then every note whose name appears in the
+transcript (people, products, topics), and pass its glossary to `Edit.save(glossary=...)` so known
+mishearings are fixed automatically. After the edit, write the video's log into the brain and
+update the notes it touched (dated facts, new assets, new mishearings, the user's feedback).
 
 ## Hard rules
 
@@ -49,6 +52,12 @@ that aren't a call to action ("So yeah, that's it. Thank you.").
 **Hook**: the first 1-3 s decide the view (TikTok: proposition in 3 s, hook within 6 s). Offer
 a cold open: the strongest single line (a number, a bold claim) moved to the front, with a short
 card (<= 6 words, 2 lines); it still plays again in its place. Ask; it's editorial.
+
+**Hook variants**: if the recording starts with several takes of the opening line (users record
+2-3 hooks back to back to test them), give each its own tag (`hook_a`, `hook_b`, ...) and build
+**one project per hook** with the same body: "<Name> hook A (Claude edit)", ... The user posts
+them as test posts (Instagram Trial Reels show a Reel only to non-followers) and keeps the winner.
+Pick the strongest take of each wording; same cards and graphics on all, so only the hook differs.
 
 Write `keep.json`: `{"sentences": [{"tag": "hook", "keep": [[first_id, last_id], ...]}, ...]}`,
 one entry per sentence, several ranges when words inside it go. Tags name the beats; cards and
@@ -143,7 +152,82 @@ Copy the export next to theirs (their `export_dir`), then `instance.sh stop` (it
 `out/` if exports are still there), and recreate the
 project in their app against `http://127.0.0.1:7377` with a fresh `make_edit_media` there.
 
-## 5. Report back
+## Long-form (YouTube, 16:9)
+
+Same pipeline, different decisions (tested on an 8-minute talking-head update):
+- `Edit(..., canvas=(1920, 1080))`; a 720p phone source upscales fine at a steady 1.26/1.36 punch-in.
+- **Cold open** (5-10 s): the 2-3 strongest lines from later (a number, a confession), each with a
+  number callout that ends with its line, then the original intro. Chapter cards (`card` at x
+  0.27, y 0.11, size 64) at each section; sub-point cards for lists; numbers beside the head.
+- **No burned captions**: `captions.enabled = False`; make the subtitles with
+  `srt.py PROJECT out.srt` and upload them to YouTube.
+- **Proof B-roll**: screenshot the user's public site with Playwright (Firefox needs
+  `firefox_user_prefs={"network.proxy.type": 0}` here), make a 1920x1080 card (blurred page behind,
+  rounded screenshot, marker highlight on the line that proves the claim), show it 3-4 s.
+- **Stutters**: in long-form a natural "from from" beats a cut that clicks or leaks a syllable;
+  when `listen.py` flags a joint inside a stutter, keep the stutter.
+- **Grade**: measure first (fingerprint `luma/contrast/saturation`). A bright wall + grey picture
+  wants contrast +0.18, saturation +0.28, temperature +0.06, sharpen 0.35, denoise 0.25, not more light.
+- **End screen**: nothing on screen in the last 10-20 s.
+- **More than logos**: logos alone read as filler. For every concrete mention,
+  find the real thing and show it with `graphics.py`:
+  - a video they mention ("I recorded a video last year") -> find it on their channel
+    (`yt-dlp --flat-playlist <channel>/videos | grep`), `yt_card(thumbnail, title, channel, date, duration)`
+  - a lecture/creator they learned from -> the actual video, same card
+  - a list of points ("what's working / not working") -> `scorecard(...)` panels, one PNG per
+    state, switched in place on each spoken item (the panel keeps its size: placeholders)
+  - an official thing (a visa, a law, a program) -> its official page as a `page_card` with the
+    title highlighted (Playwright screenshot, measure the element's box in the page)
+  - a confession / punchline ("I got rejected") -> `stamp("REJECTED")` + a low thud (Boom 0.35)
+  - the ask -> `pill("Subscribe", icon=bell)` on "I hope you enjoy the series", a Fluent 3D emoji
+    on the closing line ("a unicorn" -> unicorn_3d.png)
+- **Cards never leave the frame**: `card(..., align="left")` measures the text; long sub-point
+  text must still fit 0.86 of the width. Check every card on a frame grab.
+- **Exposure is about the face**: measure face luma (MediaPipe box, middle half) before and after
+  the grade; skin around 140-160 of 255. Contrast around a bright wall darkens the face: on a bright
+  background lift brightness (+0.15) with almost no contrast.
+- **Package**: 3 titles, a description with chapters (from the build's tag starts; first must be
+  0:00), and thumbnails with `thumbnail.py VIDEO OUT` (needs `models/face_landmarker.task`): it
+  scores every half-second for open eyes, eye contact, head pose, sharpness, no flying hands and
+  no mid-syllable mouth, writes `candidates.jpg` (top 12) and the best frame per mood. **Look at
+  candidates.jpg yourself** before choosing. `make(video_or_photo, t, "2-3 words", out, sticker=)`
+  puts the face at ~40% height, eyes on the upper third, the person on one side, relit from the
+  face; words huge on the other side; one story sticker. Best: ask the user for 3 phone photos.
+  Faces from video frames are soft: `make()` runs GFPGAN face restoration (`restore.py`; models
+  from `scripts/setup.sh --face-polish`, onnxruntime in .venv-vision) on the enlarged frame, face
+  only, at 0.45 with the identity guard (section 5). Without the models it skips the polish.
+  Real-ESRGAN (`upscale2x`) smooths skin into wax: not for faces. 0 turns restoration off.
+- Exports of 5+ minutes take 20+ minutes; `export.py --timeout` defaults to an hour.
+
+## 5. Thumbnails (every video with a thumbnail: YouTube long-form, and Shorts covers when asked)
+
+Two steps, the user picks in between (run with `.venv-vision/bin/python`):
+```
+thumbnail.py VIDEO OUT --text "2-3 WORDS" --text "..." [--sticker story.png] [--badge "SERIES LABEL|EP N" --badge-icon brand_icon.png]
+   -> OUT/faces.jpg (24 face close-ups, labelled with their second), OUT/A..F.jpg + OUT/all.jpg
+thumbnail.py VIDEO OUT --final SECONDS "WORDS" [--sticker x.png] [--badge "..."]
+   -> OUT/THUMBNAIL.jpg + OUT/THUMBNAIL_mobile.png (check it reads at 168x94)
+```
+- Show the user `faces.jpg` and `all.jpg`; they pick (a letter or a second). Their eye beats the
+  scorer: talking heads are mostly mid-sentence, the good faces are rare reactions.
+- The look is fixed in `make()`: person on the left third, face ~40% of the height, relit from the
+  face, thin soft rim (no thick halo), dark tinted background with depth + vignette, 2-3 huge words
+  (white + accent last line), one story sticker or the series "chip" (frosted label + brand icon +
+  solid accent EP block, stacked above the words).
+- Face polish: GFPGAN at 0.45 with an **identity guard** (`restore_safe`): ArcFace similarity to the
+  original face must stay >= 0.965 or the strength steps down. Calibrated on real feedback: 0.7
+  read as "not my face" (similarity 0.94-0.96), 0.45 looked like them (0.97-0.98).
+- What the data says (references/thumbnails.md): the idea carries the click, the face adds emotion;
+  max 3 elements; real expression, **mouth closed** (MrBeast's team: closed mouth won 30/30 tests);
+  eye contact when the face is the story, gaze at the sticker when the object is; 2-4 words, never
+  the title; keep the bottom-right clear (duration stamp); same font/accent/chip every episode.
+- A dedicated photo beats any video frame: ask the user for the 6-pose shot list (references).
+- Package: title + thumbnail are one story; give the user 3 *very different* variants for YouTube
+  Test & Compare (judged on watch-time share, up to 2 weeks).
+- Words tell the other half of the story the title doesn't (never repeat the title).
+- Read the user's brain (if any) for their taste; log the pick there.
+
+## 6. Report back
 
 A table, theirs vs yours: length, words/min, audible breaths, cuts and median clip, what was
 cut and restored, captions, graphics, loudness, the listen.py worst joints. Name the 1-3 spots

@@ -138,9 +138,13 @@ def plan(media_dir, keep):
         return w["start"]
 
     def offset(w):
+        # runs overlapping the word (voicing often starts before the ASR start). A run that only
+        # starts > 0.8 s into the word is something else: the ASR stretches the last word of a
+        # take over whatever comes next (moving, reaching for the phone).
         last = None
+        lim = min(t2i(w["end"]) - 3, t2i(w["start"] + 0.8))
         for a, b in RUNS:
-            if a < t2i(w["end"]) - 3 and b > t2i(w["start"]) + 3:
+            if a < lim and b > t2i(w["start"]) + 3:
                 last = b
         return last * HOP if last is not None else min(w["end"], w["start"] + 0.12)
 
@@ -266,7 +270,7 @@ def retime(media_dir):
     out, prev_end = [], 0.0
     for i, w in enumerate(ws):
         a0, a1 = t2i(w["start"]), t2i(w["end"])
-        ov = [r for r in runs if r[0] < a1 - 3 and r[1] > a0 + 3]
+        ov = [r for r in runs if r[0] < min(a1 - 3, a0 + 80) and r[1] > a0 + 3]  # see offset(): <= 0.8 s in
         s, e = w["start"], w["end"]
         if ov:
             on, off = max(ov[0][0], t2i(w["start"] - 0.15)), ov[-1][1]

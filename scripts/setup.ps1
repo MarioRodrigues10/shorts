@@ -1,8 +1,8 @@
 # Shorts setup for Windows 10/11: Python envs, ML models, caption fonts, web UI, `shorts` command.
 # Safe to re-run. From the repo folder, in PowerShell:
-#   powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 [-NoVision]
+#   powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 [-NoVision] [-FacePolish]
 # Missing tools (FFmpeg, uv, Bun) are installed with winget.
-param([switch]$NoVision)
+param([switch]$NoVision, [switch]$FacePolish)
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # makes Invoke-WebRequest much faster
 
@@ -47,6 +47,16 @@ if (-not $NoVision) {
   $base = "https://storage.googleapis.com/mediapipe-models"
   if (-not (Test-Path models\face.tflite)) { Invoke-WebRequest "$base/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite" -OutFile models\face.tflite }
   if (-not (Test-Path models\selfie.tflite)) { Invoke-WebRequest "$base/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite" -OutFile models\selfie.tflite }
+  # face landmarks + expression scores (thumbnail frame picking, eye-locked zoom in the Claude skill)
+  if (-not (Test-Path models\face_landmarker.task)) { Invoke-WebRequest "$base/face_landmarker/face_landmarker/float16/1/face_landmarker.task" -OutFile models\face_landmarker.task }
+  if ($FacePolish) {
+    # ~510 MB. GFPGAN is Apache-2.0; the InsightFace ArcFace identity model is for non-commercial research use only.
+    Say "Thumbnail face polish models (GFPGAN 1.4 + ArcFace identity guard)"
+    $ff = "https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0"
+    foreach ($m in "gfpgan_1.4.onnx", "arcface_w600k_r50.onnx") {
+      if (-not (Test-Path "models\$m")) { Invoke-WebRequest "$ff/$m" -OutFile "models\$m" }
+    }
+  }
 }
 
 # ---- Caption fonts (SIL Open Font License, from Google Fonts), served by the app ----

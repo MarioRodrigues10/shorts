@@ -61,6 +61,16 @@ Shorts ships with a [Claude Code](https://claude.com/claude-code) skill that tur
 
 **Teach it your taste.** `listen.py … --page` builds a listening page of three-second clips with *Sounds fine* and *Sounds edited* buttons. Rate a few, run `listen.py --calibrate ratings.json`, and from then on it ranks cuts the way you hear them. Put your channel's preferences (brand logos, colours, words the transcriber gets wrong for your voice) in `~/.config/shorts-studio/edit-notes.md` and the skill follows them.
 
+**YouTube videos and thumbnails too.** Ask for a long-form edit and it switches to 16:9: a cold open from your strongest lines, chapter cards, subtitles as an `.srt` to upload instead of burned-in captions, and a grade measured on your face. It also goes past logos. When you mention a video, it shows that video's card. A list of points becomes a scorecard that fills in as you talk, and a claim gets the real web page behind it as proof.
+
+```text
+> Edit ~/Videos/raw/update.mp4 as a YouTube video, then make the thumbnail.
+```
+
+Thumbnails take two steps. First it scores every half-second of your video for open eyes, eye contact, a closed mouth and sharpness. It shows you the 24 best faces and six finished layouts. You pick one, and it relights you from your face, sets 2–3 big words next to you, and adds an optional series badge. It can also polish a soft face from a phone frame. A face-recognition check makes sure the result is still you, and it backs off if it isn't (`setup.sh --face-polish`).
+
+**Compare your style with numbers.** `fingerprint.py` measures how a video is edited: cuts per second, punch-ins, how much your eye line moves, how often something new appears on screen, and the grade. Run it on your edit and on a folder of creators you admire to see where you differ.
+
 **It never touches your work.** It edits a private copy of your clip (a hardlink, so no extra disk space) and renders on a separate Shorts instance. Your projects, transcripts and exports stay as they are.
 
 <details>
@@ -70,7 +80,7 @@ Shorts ships with a [Claude Code](https://claude.com/claude-code) skill that tur
 
 - The skill lives in [`.claude/skills/shorts-edit`](.claude/skills/shorts-edit/SKILL.md). Claude Code loads it automatically in this folder. To use it from anywhere: `ln -s "$PWD/.claude/skills/shorts-edit" ~/.claude/skills/`.
 - Exports are driven in a headless browser: `python3 -m pip install playwright pillow && python3 -m playwright install firefox`.
-- Each step is a plain script you can run yourself: `breathmap.py` (breaths vs *sh*/*ch*/*s*), `cutplan.py` (cut plan), `joints.py` (ear check), `shortslib.py` (build the project), `export.py`, `verify.py` (words, breaths, loudness) and `listen.py` (the ears). The full playbook is in [`SKILL.md`](.claude/skills/shorts-edit/SKILL.md), and the editing sources behind every number are in [`references/style.md`](.claude/skills/shorts-edit/references/style.md).
+- Each step is a plain script you can run yourself: `breathmap.py` (breaths vs *sh*/*ch*/*s*), `cutplan.py` (cut plan), `joints.py` (ear check), `shortslib.py` (build the project), `export.py`, `verify.py` (words, breaths, loudness), `listen.py` (the ears), `srt.py` (subtitles), `graphics.py` (video cards, scorecards, stamps, page proof), `thumbnail.py` + `restore.py` (thumbnails and face polish) and `fingerprint.py` (style numbers). The research behind the long-form and thumbnail choices is in [`references/`](.claude/skills/shorts-edit/references). The full playbook is in [`SKILL.md`](.claude/skills/shorts-edit/SKILL.md), and the editing sources behind every number are in [`references/style.md`](.claude/skills/shorts-edit/references/style.md).
 
 </details>
 
@@ -111,7 +121,7 @@ So I built my own: the editing flow I liked in CapCut, running natively on Linux
 - **Auto captions** transcribe only the parts of your videos that are on the timeline, and only the new parts after you edit.
 - **Transcript editing:** delete words to cut them, fix misheard words, highlight words for captions.
 - One-click **Remove silences**, **Cut retakes** (false starts), **Cut fillers** (um, uh) and **Punch-in** (alternating zoom on cuts).
-- **[Claude Code skill](#or-let-claude-edit-it)**: a full edit from one prompt, with breath-aware cuts that are checked by ear.
+- **[Claude Code skill](#or-let-claude-edit-it)**: a full edit from one prompt, with breath-aware cuts that are checked by ear. It also edits YouTube videos and makes thumbnails.
 
 **Captions and graphics**
 - 7 caption styles (word highlight, box, one word, karaoke…) with full control over font, colors, outline, shadow and animation. Drag them on the canvas.
@@ -166,7 +176,7 @@ The setup script:
 - builds the UI
 - installs the `shorts` command, plus a background service on Linux, `~/Applications/Shorts.command` on macOS, or a Start Menu shortcut on Windows
 
-The Phonon-2 speech model (about 170 MB) downloads on your first transcription. Add `--no-vision` (`-NoVision` on Windows) to skip auto reframe and background replacement and save about 400 MB.
+The Phonon-2 speech model (about 170 MB) downloads on your first transcription. Add `--no-vision` (`-NoVision` on Windows) to skip auto reframe and background replacement and save about 400 MB. Add `--face-polish` (`-FacePolish`) to also download the thumbnail face-polish models (about 510 MB). GFPGAN is Apache-2.0, but the identity-check model from InsightFace is licensed for non-commercial research only.
 
 ## Use
 

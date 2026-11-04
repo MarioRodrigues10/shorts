@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 # Shorts setup for Linux and macOS: Python envs, ML models, caption fonts, web UI, `shorts` command.
-# Safe to re-run.  Usage:  scripts/setup.sh [--no-vision] [--no-service]
+# Safe to re-run.  Usage:  scripts/setup.sh [--no-vision] [--no-service] [--face-polish]
 #   --no-vision   skip auto-reframe / background replacement (saves ~400 MB)
+#   --face-polish also download the thumbnail face-polish models (~510 MB; GFPGAN is Apache-2.0,
+#                 the InsightFace ArcFace identity model is for non-commercial research use only)
 #   --no-service  Linux: don't install the systemd user service (`shorts` starts the server on demand)
 # Windows: use scripts\setup.ps1 instead.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-VISION=1 SERVICE=1
+VISION=1 SERVICE=1 POLISH=0
 for a in "$@"; do
   case "$a" in
     --no-vision) VISION=0 ;;
+    --face-polish) POLISH=1 ;;
     --no-service) SERVICE=0 ;;
     -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
     *) echo "unknown option: $a" >&2; exit 2 ;;
@@ -73,6 +76,15 @@ if [ "$VISION" = 1 ]; then
   base=https://storage.googleapis.com/mediapipe-models
   [ -s models/face.tflite ] || curl -fsSLo models/face.tflite "$base/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite"
   [ -s models/selfie.tflite ] || curl -fsSLo models/selfie.tflite "$base/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite"
+  # face landmarks + expression scores (thumbnail frame picking, eye-locked zoom in the Claude skill)
+  [ -s models/face_landmarker.task ] || curl -fsSLo models/face_landmarker.task "$base/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+  if [ "$POLISH" = 1 ]; then
+    say "Thumbnail face polish models (GFPGAN 1.4 + ArcFace identity guard)"
+    ff=https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0
+    for m in gfpgan_1.4.onnx arcface_w600k_r50.onnx; do
+      [ -s "models/$m" ] || curl -fSLo "models/$m" "$ff/$m"
+    done
+  fi
 fi
 
 # ---- Caption fonts (SIL Open Font License, from Google Fonts), served by the app ----
