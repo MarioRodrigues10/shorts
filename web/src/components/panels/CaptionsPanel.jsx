@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { ClosedCaptioning, CircleNotch, Check } from "@phosphor-icons/react";
-import { CAPTION_PRESETS, drawCaptions, defaultWordSpacing } from "../../core/layer.js";
+import { CAPTION_PRESETS, FILLS, drawCaptions, defaultWordSpacing } from "../../core/layer.js";
 import { S, commit } from "../../core/store.js";
 import * as A from "../../core/actions.js";
 import * as M from "../../core/model.js";
@@ -20,7 +20,7 @@ function Preview({ pre }) {
     const s = c.width / 1080 * 0.85;
     ctx.setTransform(s, 0, 0, s, (c.width - 1080 * s) / 2, 0);
     const words = ["THIS", "CHANGES", "EVERYTHING"].map((t, i) => ({ text: t, os: i, oe: i + 1 }));
-    const style = { ...pre, posY: 0.5, maxWords: 3, maxChars: 40, maxWidth: 0.92, mode: pre.mode === "single" ? "single" : "group", size: pre.mode === "single" ? pre.size : Math.max(pre.size, 96) };
+    const style = { ...pre, posY: pre.mode === "stack" ? 0.25 : 0.5, maxWords: 3, maxChars: 40, maxWidth: 0.92, mode: pre.mode === "single" || pre.mode === "stack" ? pre.mode : "group", size: pre.mode === "single" || pre.mode === "stack" ? pre.size : Math.max(pre.size, 96) };
     drawCaptions(ctx, { W: 1080, H: c.height / s, groups: [{ words: pre.mode === "single" ? [words[1]] : words, start: 0, end: 9 }], cap: style },
       { g: 0, a: pre.mode === "single" ? 0 : 1, n: 3, ge: 1, ae: 1, em: -1, ee: 1 }, s);
   }, [pre]);
@@ -79,7 +79,8 @@ export default function CaptionsPanel() {
       </Section>
 
       <Section title="Colors">
-        <ColorField label="Text" value={cap.color} onChange={(v) => set("color", v)} />
+        <Select label="Letter fill" value={cap.fill || ""} onChange={(v) => set("fill", v)} options={FILLS} />
+        {!cap.fill && <ColorField label="Text" value={cap.color} onChange={(v) => set("color", v)} />}
         <Segmented label="Highlight the spoken word" value={cap.highlight} onChange={(v) => set("highlight", v)}
           options={[["color", "Color"], ["box", "Box"], ["none", "Off"]]} />
         {cap.highlight !== "none" && <ColorField label={cap.highlight === "box" ? "Box color" : "Spoken word color"} value={cap.highlight === "box" ? cap.boxColor : cap.activeColor}
@@ -91,7 +92,7 @@ export default function CaptionsPanel() {
       </Section>
 
       <Section title="Layout & motion">
-        <Segmented label="Show" value={cap.mode} onChange={(v) => set("mode", v)} options={[["group", "Phrase"], ["reveal", "Word by word"], ["single", "One word"]]} />
+        <Segmented label="Show" value={cap.mode} onChange={(v) => set("mode", v)} options={[["group", "Phrase"], ["reveal", "Word by word"], ["stack", "Stack"], ["single", "One word"]]} />
         {cap.mode !== "single" && <Slider label="Words per caption" value={cap.maxWords} min={1} max={8} step={1} onChange={(v) => set("maxWords", v)} />}
         <Slider label="Vertical position" value={cap.posY} min={0.05} max={0.95} step={0.01} format={(v) => Math.round(v * 100) + "%"} onChange={(v) => set("posY", v, false)} />
         <Segmented label="Entrance" value={cap.enter} onChange={(v) => set("enter", v)} options={[["pop", "Pop"], ["fade", "Fade"], ["slide", "Slide"], ["none", "None"]]} />

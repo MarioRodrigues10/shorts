@@ -62,7 +62,19 @@ export const CAPTION_PRESETS = {
     shadow: 0, shadowColor: "rgba(0,0,0,0.6)", mode: "reveal", maxWords: 3, maxChars: 16,
     posY: 0.62, maxWidth: 0.86, lineHeight: 1.08, enter: "pop", activeScale: 1.1,
   },
+  // Kinetic stack: each word lands on its beat and the phrase piles up in staggered lines,
+  // key words big, small words small, letters filled with a texture instead of a flat colour.
+  "stack": {
+    label: "Stack", font: "Montserrat", weight: 900, size: 132, uppercase: true, stripPunct: true,
+    color: "#ffffff", activeColor: "#ffffff", futureColor: "", emphColor: "#ffe500",
+    highlight: "none", boxColor: "#ffe500", stroke: 0, strokeColor: "#000000",
+    shadow: 18, shadowColor: "rgba(0,0,0,0.45)", mode: "stack", maxWords: 4, maxChars: 26,
+    posY: 0.42, maxWidth: 0.8, lineHeight: 0.92, enter: "none", activeScale: 1.0, letterSpacing: -0.02, fill: "sky",
+  },
 };
+
+// Letter fills: textures painted inside the type ("" = the flat text colour).
+export const FILLS = [["", "Solid color"], ["sky", "Sky"], ["chrome", "Chrome"], ["sunset", "Sunset"]];
 
 export const TEXT_PRESETS = {
   "classic": { label: "Classic", font: "Montserrat", weight: 900, size: 78, color: "#ffffff", bg: "", stroke: 9, strokeColor: "#000000", shadow: 12, uppercase: false },
@@ -128,6 +140,7 @@ function findGroup(groups, t) {
 }
 
 const ENTER_DUR = { pop: 0.18, fade: 0.15, slide: 0.2, none: 0 };
+const STACK_IN = 0.16; // seconds a word takes to land in "stack" mode
 
 function captionState(groups, cap, t) {
   const st = { g: -1, a: -1, n: 0, ge: 1, ae: 1, em: -1, ee: 1 };
@@ -140,10 +153,13 @@ function captionState(groups, cap, t) {
   st.ge = ed ? q2((t - g.start) / ed) : 1;
   let a = -1;
   for (let i = 0; i < g.words.length; i++) if (g.words[i].os <= t) a = i;
+  const shown = a; // words already spoken stay on screen in reveal/stack, even after the highlight ends
   if (a >= 0 && t > g.words[a].oe + 0.25 && a === g.words.length - 1 && cap.mode !== "single") a = -1;
   st.a = a;
-  st.n = cap.mode === "reveal" ? Math.max(1, a + 1) : cap.mode === "single" ? 1 : g.words.length;
+  const builds = cap.mode === "reveal" || cap.mode === "stack";
+  st.n = builds ? Math.max(1, shown + 1) : cap.mode === "single" ? 1 : g.words.length;
   if (a >= 0 && cap.activeScale > 1) st.ae = q2((t - g.words[a].os) / 0.12);
+  if (cap.mode === "stack" && shown >= 0) st.we = q2((t - g.words[shown].os) / STACK_IN);
   for (let i = 0; i < g.words.length; i++) {
     if (g.words[i].emoji && g.words[i].os <= t) { st.em = i; st.ee = q2((t - g.words[i].os) / 0.22); break; }
   }
@@ -250,10 +266,165 @@ function layoutGroup(ctx, g, style, W) {
   return res;
 }
 
+// ---------------------------------------------------------------------------
+// Letter fills (procedural, so no image assets): cached per kind
+// ---------------------------------------------------------------------------
+const fillCache = new Map();
+function rng(seed) { return () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296); }
+function fillCanvas(kind) {
+  if (fillCache.has(kind)) return fillCache.get(kind);
+  let c = null;
+  try { c = document.createElement("canvas"); } catch { c = null; }
+  const x = c && c.getContext ? c.getContext("2d") : null;
+  if (!x) { fillCache.set(kind, null); return null; }
+  const N = 512;
+  c.width = N; c.height = N;
+  const R = rng(7);
+  if (kind === "sky") { // a bright summer sky: clear blue with white cloud banks, high contrast like a photo fill
+    const g = x.createLinearGradient(0, 0, 0, N);
+    g.addColorStop(0, "#4f8fd6"); g.addColorStop(0.5, "#86bdf0"); g.addColorStop(1, "#3f80cc");
+    x.fillStyle = g; x.fillRect(0, 0, N, N);
+    for (let i = 0; i < 34; i++) { // cloud puffs with dense cores, wrapped so the pattern tiles without seams
+      const cx = R() * N, cy = R() * N, r = 22 + R() * 80, a = 0.6 + R() * 0.4;
+      for (const [dx, dy] of [[0, 0], [N, 0], [-N, 0], [0, N], [0, -N]]) {
+        const rg = x.createRadialGradient(cx + dx, cy + dy, 0, cx + dx, cy + dy, r);
+        rg.addColorStop(0, `rgba(255,255,255,${a})`); rg.addColorStop(0.45, `rgba(250,252,255,${a * 0.85})`); rg.addColorStop(1, "rgba(255,255,255,0)");
+        x.fillStyle = rg; x.fillRect(cx + dx - r, cy + dy - r, r * 2, r * 2);
+      }
+    }
+  } else if (kind === "chrome") {
+    const g = x.createLinearGradient(0, 0, 0, N);
+    [["#ffffff", 0], ["#e8edf2", 0.2], ["#9aa6b2", 0.42], ["#f4f6f8", 0.5], ["#c3ccd5", 0.7], ["#ffffff", 0.86], ["#aeb8c2", 1]]
+      .forEach(([col, s]) => g.addColorStop(s, col));
+    x.fillStyle = g; x.fillRect(0, 0, N, N);
+  } else if (kind === "sunset") {
+    const g = x.createLinearGradient(0, 0, N * 0.3, N);
+    g.addColorStop(0, "#ffe9a8"); g.addColorStop(0.5, "#ff9f6e"); g.addColorStop(1, "#ff5f8f");
+    x.fillStyle = g; x.fillRect(0, 0, N, N);
+  } else { fillCache.set(kind, null); return null; }
+  fillCache.set(kind, c);
+  return c;
+}
+// The fill as a canvas pattern, scaled so one tile spans about a phrase whatever the font size.
+// (ox, oy) = where the current drawing origin sits in the caption block, so the texture runs
+// continuously across the words instead of restarting in each one.
+function fillStyleFor(ctx, style, size, ox = 0, oy = 0) {
+  const c = style.fill ? fillCanvas(style.fill) : null;
+  if (!c || !ctx.createPattern) return null;
+  const p = ctx.createPattern(c, "repeat");
+  if (p && p.setTransform && typeof DOMMatrix !== "undefined") {
+    const k = (size * 3.2) / c.width;
+    p.setTransform(new DOMMatrix([k, 0, 0, k, -size * 1.3 - ox, -size * 2.1 - oy]));
+  }
+  return p;
+}
+
+// ---------------------------------------------------------------------------
+// Stack mode: the phrase builds up word by word in staggered lines
+// ---------------------------------------------------------------------------
+const SMALL_WORDS = new Set(("a an the to of in on at by for and or but so if is are was were be been am it its i you we he she they " +
+  "me my your our his her their this that with as from up out just than then").split(" "));
+export const isSmallWord = (text) => SMALL_WORDS.has(text.toLowerCase().replace(/[^a-z']/g, ""));
+
+function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; }
+
+export function layoutStack(ctx, g, style, W) {
+  const key = ["stack", style.font, style.weight, style.size, style.letterSpacing || 0, style.wordSpacing ?? "", style.uppercase, style.stripPunct,
+    style.maxWidth, style.lineHeight, W, ...g.words.map((w) => w.text + (w.emph ? "*" : ""))].join("|");
+  const hit = layoutCache.get(key);
+  if (hit) return hit;
+  const maxW = W * style.maxWidth;
+  const items = g.words.map((w, i) => {
+    const text = displayText(w, style);
+    let s = style.size * (w.emph ? 1.3 : isSmallWord(w.text) ? 0.58 : 1);
+    setFont(ctx, style, s);
+    let wd = textW(ctx, text, style, s);
+    if (wd > maxW) { s *= maxW / wd; setFont(ctx, style, s); wd = textW(ctx, text, style, s); }
+    return { i, text, s, w: wd, small: !w.emph && isSmallWord(w.text) };
+  });
+  // Small words ride with the next key word; a key word closes its line.
+  const lines = [];
+  let line = [];
+  const gapOf = (a) => (style.wordSpacing ?? 0.24) * a.s;
+  const lineW = (ln) => ln.reduce((n, it, k) => n + it.w + (k ? gapOf(it) : 0), 0);
+  for (const it of items) {
+    if (line.length && (line.some((x) => !x.small) || lineW(line) + gapOf(it) + it.w > maxW)) { lines.push(line); line = []; }
+    line.push(it);
+  }
+  if (line.length) lines.push(line);
+  // Stagger: each line drifts left, right or stays centred (stable per text), never past maxWidth.
+  let y = 0;
+  const out = lines.map((ln) => {
+    const w = lineW(ln), lh = Math.max(...ln.map((it) => it.s)) * style.lineHeight;
+    const slack = Math.max(0, (maxW - w) / 2);
+    const side = (hashStr(ln.map((it) => it.text).join(" ")) % 3) - 1;
+    let x = -w / 2 + side * Math.min(slack, W * 0.09);
+    const row = { items: ln, w, lh, y: y + lh / 2 };
+    ln.forEach((it, k) => { if (k) x += gapOf(it); it.x = x; it.y = row.y; x += it.w; });
+    y += lh;
+    return row;
+  });
+  for (const row of out) for (const it of row.items) it.y -= y / 2;
+  const res = { lines: out, height: y, width: Math.min(maxW, Math.max(...out.map((r) => r.w)) + W * 0.18) };
+  if (layoutCache.size > 4000) layoutCache.clear();
+  layoutCache.set(key, res);
+  return res;
+}
+
+function drawStack(ctx, L, st, scale) {
+  const style = L.cap, { W, H } = L;
+  const g = L.groups[st.g];
+  const lay = layoutStack(ctx, g, style, W);
+  // posY is the TOP of the block: a phrase grows downward, so a tall stack never climbs onto the face
+  const cx = W / 2, cy = H * style.posY + lay.height / 2;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  const items = [];
+  for (const ln of lay.lines) for (const it of ln.items) if (it.i < st.n) items.push(it);
+  const last = st.n - 1;
+  const pose = (it) => { // the newest word lands: grows past full size, settles, fades in, small rise
+    if (it.i !== last || st.we == null || st.we >= 1) return { s: 1, a: 1, dy: 0 };
+    const p = st.we;
+    return { s: 0.55 + 0.45 * easeOutBack(p), a: easeOutCubic(Math.min(1, p * 1.6)), dy: it.s * 0.18 * (1 - easeOutCubic(p)) };
+  };
+  const withWord = (it, fn) => {
+    const { s, a, dy } = pose(it);
+    ctx.save();
+    ctx.globalAlpha *= a;
+    ctx.translate(it.x + it.w / 2, it.y + dy);
+    ctx.scale(s, s);
+    ctx.translate(-it.w / 2, 0);
+    setFont(ctx, style, it.s);
+    fn();
+    ctx.restore();
+  };
+  if (style.stroke > 0 || style.shadow > 0) {
+    for (const it of items) withWord(it, () => {
+      ctx.shadowColor = style.shadowColor || "rgba(0,0,0,.5)";
+      ctx.shadowBlur = style.shadow * scale;
+      ctx.shadowOffsetY = style.shadow * 0.25 * scale;
+      if (style.stroke > 0) { ctx.lineJoin = "round"; ctx.strokeStyle = style.strokeColor; ctx.lineWidth = style.stroke * 2; ctx.strokeText(it.text, 0, 0); }
+      else { ctx.fillStyle = style.shadowColor || "rgba(0,0,0,.5)"; ctx.fillText(it.text, 0, 0); }
+    });
+  }
+  ctx.shadowColor = "transparent";
+  for (const it of items) withWord(it, () => {
+    const w = g.words[it.i];
+    const pat = fillStyleFor(ctx, style, style.size, it.x, it.y);
+    ctx.fillStyle = w.emph && !pat ? style.emphColor : pat || style.color;
+    ctx.fillText(it.text, 0, 0);
+  });
+  ctx.restore();
+  return { x: cx - lay.width / 2 - 20, y: cy - lay.height / 2 - 20, w: lay.width + 40, h: lay.height + 40 };
+}
+
 // Returns the caption bounding box (canvas units) or null.
 export function drawCaptions(ctx, L, st, scale) {
   const style = L.cap;
   if (!style || st.g < 0) return null;
+  if (style.mode === "stack") return drawStack(ctx, L, st, scale);
   const { W, H } = L;
   const g = L.groups[st.g];
   const lay = layoutGroup(ctx, g, style, W);

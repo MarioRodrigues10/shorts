@@ -80,7 +80,7 @@ Thumbnails take two steps. First it scores every half-second of your video for o
 
 - The skill lives in [`.claude/skills/shorts-edit`](.claude/skills/shorts-edit/SKILL.md). Claude Code loads it automatically in this folder. To use it from anywhere: `ln -s "$PWD/.claude/skills/shorts-edit" ~/.claude/skills/`.
 - Exports are driven in a headless browser: `python3 -m pip install playwright pillow && python3 -m playwright install firefox`.
-- Each step is a plain script you can run yourself: `breathmap.py` (breaths vs *sh*/*ch*/*s*), `cutplan.py` (cut plan), `joints.py` (ear check), `shortslib.py` (build the project), `export.py`, `verify.py` (words, breaths, loudness), `listen.py` (the ears), `srt.py` (subtitles), `graphics.py` (video cards, scorecards, stamps, page proof), `thumbnail.py` + `restore.py` (thumbnails and face polish) and `fingerprint.py` (style numbers). The research behind the long-form and thumbnail choices is in [`references/`](.claude/skills/shorts-edit/references). The full playbook is in [`SKILL.md`](.claude/skills/shorts-edit/SKILL.md), and the editing sources behind every number are in [`references/style.md`](.claude/skills/shorts-edit/references/style.md).
+- Each step is a plain script you can run yourself: `breathmap.py` (breaths vs *sh*/*ch*/*s*), `cutplan.py` (cut plan), `joints.py` (ear check), `shortslib.py` (build the project), `export.py`, `verify.py` (words, breaths, loudness), `listen.py` (the ears), `srt.py` (subtitles), `graphics.py` (video cards, scorecards, stamps, page proof, title cards), `ui.py` + `uicheck.py` (explainer graphics from one design system, and a check before export), `thumbnail.py` + `restore.py` (thumbnails and face polish) and `fingerprint.py` (style numbers). The research behind the long-form and thumbnail choices is in [`references/`](.claude/skills/shorts-edit/references). The full playbook is in [`SKILL.md`](.claude/skills/shorts-edit/SKILL.md), and the editing sources behind every number are in [`references/style.md`](.claude/skills/shorts-edit/references/style.md).
 
 </details>
 
@@ -124,7 +124,8 @@ So I built my own: the editing flow I liked in CapCut, running natively on Linux
 - **[Claude Code skill](#or-let-claude-edit-it)**: a full edit from one prompt, with breath-aware cuts that are checked by ear. It also edits YouTube videos and makes thumbnails.
 
 **Captions and graphics**
-- 7 caption styles (word highlight, box, one word, karaoke…) with full control over font, colors, outline, shadow and animation. Drag them on the canvas.
+- 8 caption styles (word highlight, box, one word, karaoke, stack…) with full control over font, colors, outline, shadow and animation. Drag them on the canvas.
+- **Stack** captions for music edits: each word lands on its beat and the phrase piles up in staggered lines, key words bigger, letters filled with a sky, chrome or sunset texture.
 - Text presets, emoji stickers, and highlight shapes (boxes, circles, arrows, underlines).
 
 **Timeline**
@@ -144,7 +145,7 @@ So I built my own: the editing flow I liked in CapCut, running natively on Linux
 
 **Export**
 - 30 or 60 fps, 1080p or 720p, H.264 + AAC. Uses the Intel GPU encoder (VA-API) on Linux when available, x264 otherwise.
-- No generational loss: each clip is rendered losslessly once and cached; only the final encode compresses.
+- Each clip is rendered once and cached (near-lossless on the GPU, lossless with x264), several at a time; only the final encode compresses. On VA-API the final pass also decodes on the GPU.
 
 ## Install
 
