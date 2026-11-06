@@ -48,6 +48,8 @@ that aren't a call to action ("So yeah, that's it. Thank you.").
 - the lead-in that names who a sentence is about ("So if you're a content creator, ...")
 - a whole sentence, emphasis lines ("That is the main thing."), dramatic pauses
 - Read the kept script as prose: every sentence must make sense given only what came before.
+- Scan the kept words for doubled words at the seams ("because because", "you you", "a a"): a keep
+  range that ends on a word the next range starts with. Keep only deliberate repeats ("wait, wait, wait").
 
 **Hook**: the first 1-3 s decide the view (TikTok: proposition in 3 s, hook within 6 s). Offer
 a cold open: the strongest single line (a number, a bold claim) moved to the front, with a short
@@ -107,6 +109,11 @@ fade, preset karaoke captions with emojis, a zoom on every cut, text every secon
 - **Captions** `CLEAN_CAPTIONS`: Inter 800, 66, sentence case, white + ONE accent (`ACCENT`) on
   the active word, soft shadow, 3 words a page, fade in, posY 0.66, no emojis. Fix misheard
   words with `word_edits`; text `""` hides a word.
+- **Kinetic captions** `STACK_CAPTIONS` (preset "Stack"): each word lands on its beat and the phrase
+  piles up in staggered lines, key words big, small words (the, to, you…) at 58%, letters filled with
+  a texture (`fill`: sky / chrome / sunset) instead of an accent colour. For music-driven "edit"
+  videos (montage, fast B-roll), not talking heads; posY is the block's top edge (it grows downward):
+  0.56 starts it just under the chin on talking-head shots.
 - **Zoom** `zoom_eyes()`: medium/tight (1.0/1.08) per cut with the **eyes locked** at one height
   (`y = 2*eye_y - 1`; measure eye height on a frame, ~0.33 for a usual phone selfie framing),
   a 1.16 punch only on the first clip of payoff beats, slow push on the hook. A whoosh whose
@@ -118,10 +125,19 @@ fade, preset karaoke captions with emojis, a zoom on every cut, text every secon
   Wide wordmarks go under the chin, above the captions (x 0.5, y 0.565, scale 0.34).
 - **Lists of brands**: one translucent panel (`sticker.py panel`, y 0.565, scale 0.78), logos
   popping on their words (x 0.26/0.42/0.58/0.74, scale 0.135), a Click (0.7) each.
-- **Cards** `card()`: ONE style and size for the whole video (white rounded box, Montserrat 900,
-  60, slide in, y 0.13). Text only on key points.
+- **Cards** `title_card(text, start, end, style=, accent=[...])`: three styles, each with one job so the
+  mix reads as designed: "marker" (key word on a tilted accent tag) for the hook, "frosted" (smoked
+  glass, key word in the accent) for key points, "plain" (big white + accent, soft shadow) for
+  one-line statements and numbers. Same size across the video, y 0.13, text only on key points.
+  (`card()`, the plain white box, still exists if a user prefers it.)
 - **Numbers** `number("10×", None)`: big accent number above the head; skip the label when the
   captions already say it.
+- **Explainers** (processes, lists, comparisons): build them with `scripts/ui.py` (one design system:
+  neutrals + ONE accent, one type scale, 8 px grid, components that refuse text that doesn't fit) and place
+  them with `Edit.ui_panel / ui_states / ui_ping` (calm fade-up, state changes on the spoken word, a focus
+  ring on the new step; no bounce). Rules: `references/motion-design.md`. Run `scripts/uicheck.py` on every
+  graphic before exporting (palette, edges, size) and look at its review sheet. Hand-drawn rainbow boxes
+  that pop in one by one read as "vibecoded" (2026-11-05).
 - **Never** cover the face (check mouth and chin on a frame grab) or the caption band.
 - Sound: normalize -14 LUFS, repair on, "Lower breaths" on (`save()` sets them). No music by
   default (licensing); if wanted: -18 to -25 dB under the voice, ducked.

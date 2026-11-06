@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import shutil
+import struct
 import sys
 import urllib.request
 import uuid
@@ -50,6 +51,16 @@ CLEAN_CAPTIONS = {"enabled": True, "preset": "clean", "label": "Clean (shorts-ed
                   "strokeColor": "#000000", "shadow": 22, "shadowColor": "rgba(0,0,0,0.8)", "mode": "group",
                   "maxWords": 3, "maxChars": 20, "posY": 0.66, "maxWidth": 0.84, "lineHeight": 1.2, "enter": "fade",
                   "activeScale": 1.0}
+
+# Kinetic "stack" captions (web/src/core/layer.js preset "stack"): words land on their beat and pile
+# up into the phrase, key words big, small words small, letters filled with a sky texture.
+# posY is the TOP of the block in stack mode (it grows downward): 0.56 starts just under the chin.
+STACK_CAPTIONS = {"enabled": True, "preset": "stack", "label": "Stack (shorts-edit)", "font": "Montserrat", "weight": 900,
+                  "size": 132, "uppercase": True, "stripPunct": True, "color": "#ffffff", "activeColor": "#ffffff",
+                  "futureColor": "", "emphColor": ACCENT, "highlight": "none", "boxColor": ACCENT, "stroke": 0,
+                  "strokeColor": "#000000", "shadow": 18, "shadowColor": "rgba(0,0,0,0.45)", "mode": "stack",
+                  "maxWords": 4, "maxChars": 26, "posY": 0.56, "maxWidth": 0.8, "lineHeight": 0.92, "enter": "none",
+                  "activeScale": 1.0, "letterSpacing": -0.02, "fill": "sky"}
 
 
 def api(base, path, body=None, method=None):
@@ -275,6 +286,104 @@ class Edit:
         (16:9 chapter cards); centred cards are pushed inside the frame if they'd overflow."""
         t = self.title(text, start, end, preset="title-box", size=size, y=y, anim="slide")
         return self.fit_x(t, x, align)
+
+    def title_card(self, text, start, end, style="frosted", accent=(), y=0.13, size=64, x=0.5):
+        """A styled title card (graphics.title_card) as an image overlay with a small pop-in.
+        Styles, each with a job so a mix reads as designed: "marker" (accent word on a tilted
+        yellow tag) for the hook, "frosted" (smoked glass, accent word yellow) for key points,
+        "plain" (no box, white + yellow, soft shadow) for one-line statements and numbers.
+        The PNG lives in <data>/cards so the project keeps working after the edit."""
+        import struct
+        import subprocess
+        d = self.data / "cards"
+        d.mkdir(parents=True, exist_ok=True)
+        key = hashlib.sha1(json.dumps([text, style, list(accent), size]).encode()).hexdigest()[:12]
+        p = d / f"card-{style}-{key}.png"
+        if not p.exists():  # graphics.py runs on the system python3 + Pillow (the app venv has no Pillow)
+            subprocess.run([shutil.which("python3") or "python3", "-c",
+                            "import sys, json; sys.path.insert(0, sys.argv[1]); from graphics import title_card; "
+                            "title_card(*json.loads(sys.argv[2]))",
+                            str(Path(__file__).parent), json.dumps([text, str(p), style, list(accent), size])], check=True)
+        scale = round(struct.unpack(">I", p.read_bytes()[16:20])[0] / self.canvas[0], 4)  # PNG width
+        # never off the frame: a wide card asked to sit at x 0.24 got its first letter cut (Ep. 2, 2026-11-05).
+        # The PNG carries ~50 px of shadow padding each side, so the visible card keeps a margin.
+        x = round(min(max(x, scale / 2 + 0.01), 1 - scale / 2 - 0.01), 4)
+        dur = round(end - start, 3)
+        f = lambda n: round(n / FPS, 3)
+        o = {"id": uid(), "mid": self._media(p), "start": snap(start), "in": 0, "out": dur, "speed": 1, "volume": 1,
+             "mute": False, "x": x, "y": y, "scale": scale, "opacity": 1, "cover": False, "fadeIn": f(3), "fadeOut": f(5),
+             "kf": {"scale": [{"t": 0, "v": round(scale * 0.9, 4)}, {"t": f(6), "v": round(scale * 1.03, 4)},
+                              {"t": f(10), "v": scale}],
+                    "y": [{"t": 0, "v": round(y + 0.012, 4)}, {"t": f(8), "v": y}]}}
+        self.overlays.append(o)
+        return o
+
+    # ---- explainer UI (ui.py components; rules in references/motion-design.md) ----------------
+    def _ui_scale(self, png, size=1.0):
+        """ui.py PNGs are drawn at 2x in design px (1 design px = 1 canvas px on 1080x1920 and on 1920x1080)."""
+        w = struct.unpack(">I", Path(png).read_bytes()[16:20])[0] / 2
+        k = min(self.canvas) / 1080 * size
+        return round(w * k / self.canvas[0], 4), k
+
+    def ui_render(self, component, *args, **kw):
+        """Render a ui.py component (stepper / list_panel / ring) with the system python3 + Pillow.
+        Returns the PNG path (and writes <png>.json geometry for steppers)."""
+        import subprocess
+        d = self.data / "ui"
+        d.mkdir(parents=True, exist_ok=True)
+        ver = hashlib.sha1((Path(__file__).parent / "ui.py").read_bytes()).hexdigest()[:8]  # design changes re-render
+        key = hashlib.sha1(json.dumps([component, args, kw, ver], sort_keys=True).encode()).hexdigest()[:12]
+        out = d / f"{component}-{key}.png"
+        if not out.exists():
+            subprocess.run([shutil.which("python3") or "python3", str(Path(__file__).parent / "ui.py"), component,
+                            json.dumps([list(args) + [str(out)], kw])], check=True,
+                           capture_output=True)
+        return out
+
+    def ui_panel(self, png, start, until, x, y, size=1.0, enter=True, leave=True):
+        """A UI panel: fades up into place (8 frames, opacity 0->1, 12 px rise, 97%->100%), holds, fades
+        out (6 frames). No bounce, no tilt: bounce is for stickers, not interface."""
+        s, _ = self._ui_scale(png, size)
+        d = round(until - start, 3)
+        f = lambda n: round(n / FPS, 3)
+        kf = {}
+        if enter:
+            kf = {"opacity": [{"t": 0, "v": 0}, {"t": f(8), "v": 1}],
+                  "y": [{"t": 0, "v": round(y + 12 / self.canvas[1], 4)}, {"t": f(8), "v": y}],
+                  "scale": [{"t": 0, "v": round(s * 0.97, 4)}, {"t": f(8), "v": s}]}
+        if leave and d > f(16):
+            kf.setdefault("opacity", [{"t": 0, "v": 1}]).extend([{"t": round(d - f(6), 3), "v": 1}, {"t": d, "v": 0}])
+        o = {"id": uid(), "mid": self._media(png), "start": snap(start), "in": 0, "out": d, "speed": 1, "volume": 1,
+             "mute": False, "x": x, "y": y, "scale": s, "opacity": 1, "cover": False, "fadeIn": 0, "fadeOut": 0, "kf": kf}
+        self.overlays.append(o)
+        return o
+
+    def ui_states(self, frames, until, x, y, size=1.0):
+        """A panel that changes state in place: frames = [(png, start), ...]. The first fades up, the
+        others replace it instantly on their word (a state change, like real UI), the last fades out."""
+        out = []
+        for i, (png, t) in enumerate(frames):
+            end = frames[i + 1][1] if i + 1 < len(frames) else until
+            out.append(self.ui_panel(png, t, end, x, y, size, enter=(i == 0), leave=(i == len(frames) - 1)))
+        return out
+
+    def ui_ping(self, png_ring, at, x, y, size=1.0):
+        """Focus ring on a node that just became current: 90% -> 160% and fades out over 12 frames."""
+        s, _ = self._ui_scale(png_ring, size)
+        f = lambda n: round(n / FPS, 3)
+        o = {"id": uid(), "mid": self._media(png_ring), "start": snap(at), "in": 0, "out": f(12), "speed": 1, "volume": 1,
+             "mute": False, "x": x, "y": y, "scale": s, "opacity": 1, "cover": False, "fadeIn": 0, "fadeOut": 0,
+             "kf": {"scale": [{"t": 0, "v": round(s * 0.9, 4)}, {"t": f(12), "v": round(s * 1.6, 4)}],
+                    "opacity": [{"t": 0, "v": 0.9}, {"t": f(12), "v": 0}]}}
+        self.overlays.append(o)
+        return o
+
+    def ui_node(self, png, node, x, y, size=1.0):
+        """Canvas position of stepper node `node` for a panel placed at (x, y) (reads <png>.json)."""
+        geo = json.loads(Path(str(png) + ".json").read_text())
+        _, k = self._ui_scale(png, size)
+        dx, dy = geo["nodes"][node]
+        return round(x + dx * k / self.canvas[0], 4), round(y + dy * k / self.canvas[1], 4)
 
     def number(self, big, label, start, end, y=0.17, accent="#FFD23F", x=None):
         """Key-number callout: the number in the accent colour, a white label under it."""

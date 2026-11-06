@@ -246,3 +246,56 @@ def page_card(shot, out, highlight=None, crop_top=0):
     canvas.paste(c.convert("RGB"), (x, y), m)
     canvas.save(out)
     return out
+
+
+def title_card(text, out, style="frosted", accent=(), size=64):
+    """A title card in one of three styles that work together in one video (each has a job):
+      "marker"  white words, the accent word(s) on a tilted yellow tag  -> the hook (most playful)
+      "frosted" smoked-glass box, white text, accent word(s) yellow       -> key points
+      "plain"   big white text, accent word(s) yellow, soft shadow, no box -> one-line statements, numbers
+    text: lines split by "\\n"; accent: words (as written, punctuation included) to highlight.
+    Rendered at canvas pixels (1080-wide): place with scale = width / 1080 (shortslib.title_card does)."""
+    acc = {w.lower() for w in accent}
+    weight = 900 if style in ("plain", "marker") else 800
+    size = int(size * (1.12 if style == "plain" else 1.0))
+    f = font(size, weight)
+    probe = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
+    space = probe.textlength(" ", font=f)
+    lines = [ln.split() for ln in text.split("\n")]
+    lh = int(size * 1.28)
+    tag_pad = int(size * 0.32)
+    widths = []
+    for ws in lines:
+        w = sum(probe.textlength(x, font=f) for x in ws) + space * (len(ws) - 1)
+        if style == "marker":
+            w += sum(2 * tag_pad for x in ws if x.lower() in acc)
+        widths.append(w)
+    tw, th = int(max(widths)), lh * len(lines)
+    padx, pady = (int(size * 0.55), int(size * 0.32)) if style == "frosted" else (int(size * 0.3), int(size * 0.3))
+    card = Image.new("RGBA", (tw + 2 * padx, th + 2 * pady), (0, 0, 0, 0))
+    d = ImageDraw.Draw(card)
+    if style == "frosted":  # smoked glass (a video overlay can't blur what's behind it): dark tint + light rim
+        d.rounded_rectangle((0, 0, card.width - 1, card.height - 1), int(size * 0.45), fill=(14, 14, 18, 168),
+                            outline=(255, 255, 255, 64), width=2)
+    for i, ws in enumerate(lines):
+        x = padx + (tw - widths[i]) / 2
+        y = pady + i * lh + (lh - size) * 0.35
+        for w in ws:
+            wl = probe.textlength(w, font=f)
+            hit = w.lower() in acc
+            if style == "marker" and hit:
+                tag = Image.new("RGBA", (int(wl + 2 * tag_pad), int(size * 1.42)), (0, 0, 0, 0))
+                ImageDraw.Draw(tag).rounded_rectangle((0, 0, tag.width - 1, tag.height - 1), int(size * 0.26), fill=ACCENT + (255,))
+                ImageDraw.Draw(tag).text((tag_pad, int(size * 0.14)), w, font=f, fill=(17, 17, 17, 255))
+                tag = tag.rotate(3, resample=Image.BICUBIC, expand=True)
+                card.alpha_composite(tag, (int(x), int(y - size * 0.24)))
+                x += wl + 2 * tag_pad + space
+            else:
+                d.text((x, y), w, font=f, fill=(ACCENT + (255,)) if hit else (255, 255, 255, 255))
+                x += wl + space
+    if style == "frosted":
+        card = shadowed(card, blur=26, dy=12, alpha=0.45, pad=40)
+    else:
+        card = shadowed(card, blur=16, dy=6, alpha=0.75, pad=40)
+    card.save(out)
+    return out

@@ -43,11 +43,21 @@ def scan(video, step=0.5):
     dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(video)],
                                capture_output=True, text=True).stdout)
     W, H = 960, 540
-    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(video), "-vf", f"fps={1 / step},scale={W}:{H}",
-                          "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
-    frames = np.frombuffer(raw, np.uint8).reshape(-1, H, W, 3)
+    # Stream one frame at a time: holding every frame of an 11-minute take at 960x540 is ~4 GB
+    # and got the process killed on an 8 GB laptop (2026-11-05).
+    proc = subprocess.Popen(["ffmpeg", "-v", "error", "-i", str(video), "-vf", f"fps={1 / step},scale={W}:{H}",
+                             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+
+    def frames():
+        n = W * H * 3
+        while True:
+            buf = proc.stdout.read(n)
+            if len(buf) < n:
+                break
+            yield np.frombuffer(buf, np.uint8).reshape(H, W, 3)
+        proc.wait()
     out, prev = [], None
-    for k, f in enumerate(frames):
+    for k, f in enumerate(frames()):
         r = lm.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(f)))
         g = f.mean(2)
         if not r.face_landmarks:
