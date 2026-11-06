@@ -114,6 +114,10 @@ DEFAULT_CONFIG = {
     "x264_preset": "medium",
     "crf": 16,
     "vaapi_qp": 14,
+    # Intermediate clip pieces: Intel GPU at this CQP (8 = 54 dB PSNR vs lossless, visually identical,
+    # ~35% faster and half the disk of x264 lossless). 0 = x264 lossless on the CPU (the old way).
+    "intermediate_qp": 8,
+    "render_workers": 2,  # clip pieces rendered at the same time (each filter chain is mostly one core)
     "ffmpeg_stall_seconds": 180,
     "x264_threads": 6,  # CPU encodes: 6 uses ~15% less RAM than ffmpeg's default (1.5x cores) at the same quality  # stop an ffmpeg run that makes no progress for this long
 }
@@ -278,7 +282,12 @@ def video_encode_args(final=True, quality="high"):
         return ([], "", ["-c:v", "libx264", "-preset", "slow", "-crf", "14", "-profile:v", "high",
                          "-level:v", "4.2", "-pix_fmt", "yuv420p", "-threads", str(CONFIG["x264_threads"])])
     if not final:
-        # Intermediates are lossless: no generational loss before the final encode.
+        qp = int(CONFIG.get("intermediate_qp", 8) or 0)
+        dev = vaapi_device() if qp > 0 else None
+        if dev:  # near-lossless on the GPU: no visible generational loss before the final encode
+            return (["-vaapi_device", dev], ",format=nv12,hwupload",
+                    ["-c:v", "h264_vaapi", "-rc_mode", "CQP", "-qp", str(qp), "-profile:v", "high"])
+        # x264 lossless: no generational loss at all
         return ([], "", ["-c:v", "libx264", "-preset", "ultrafast", "-qp", "0", "-pix_fmt", "yuv420p", "-threads", "4"])
     dev = vaapi_device()
     if dev:
@@ -1150,14 +1159,15 @@ def render_main_piece(c, W, H, bg, fps, a, b, nframes, job_progress=None, repair
     declip = bool(repair and m.get("clipped"))
     key_obj = {k: c.get(k) for k in ("mid", "in", "out", "speed", "volume", "mute", "afadeIn", "afadeOut",
                                      "fit", "zoom", "zoomEnd", "x", "y", "effect", "adj", "kf", "flip", "crop", "smooth", "clean")}
-    key_obj.update(W=W, H=H, bg=bg, fps=fps, v=10, path=m["path"], declip=declip, a=round(a, 4), n=nframes)
+    pre_in, suffix, codec = video_encode_args(final=False)
+    key_obj.update(W=W, H=H, bg=bg, fps=fps, v=10, path=m["path"], declip=declip, a=round(a, 4), n=nframes,
+                   enc=" ".join(codec))
     if breaths:
         key_obj.update(breaths=breaths, breath_gain=round(BREATH_GAIN, 4))
     out, key = _cache_out(key_obj)
     if out.exists():
         return out
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    _, _, codec = video_encode_args(final=False)
     src_in = c["in"] + a * speed
     if m["kind"] == "image":
         inputs = ["-loop", "1", "-framerate", str(fps), "-t", f"{dur + 0.5:.4f}", "-i", m["path"]]
@@ -1165,7 +1175,7 @@ def render_main_piece(c, W, H, bg, fps, a, b, nframes, job_progress=None, repair
         inputs = ["-ss", f"{src_in:.4f}", "-t", f"{dur * speed + 0.25:.4f}", "-i", m["path"]]
     vf = main_clip_filters(c, m, W, H, bg, fps, a)
     # exact frame count inside the graph (an output -frames:v limit would cut the audio short at EOF)
-    graph = [f"[0:v]{vf},tpad=stop_mode=clone:stop=-1,trim=end_frame={nframes},setpts=PTS-STARTPTS[v]"]
+    graph = [f"[0:v]{vf},tpad=stop_mode=clone:stop=-1,trim=end_frame={nframes},setpts=PTS-STARTPTS{suffix}[v]"]
     vol = 0 if c.get("mute") else float(c.get("volume", 1.0))
     if m.get("has_audio") and m["kind"] == "video":
         ach = "[0:a]asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo"
@@ -1188,7 +1198,7 @@ def render_main_piece(c, W, H, bg, fps, a, b, nframes, job_progress=None, repair
     else:
         graph.append(f"anullsrc=r=48000:cl=stereo,atrim=0:{dur:.5f}[a]")
     tmp = CACHE_DIR / f"{key}.{uuid.uuid4().hex[:6]}.tmp.mkv"
-    run_ffmpeg(["ffmpeg", "-y"] + inputs + ["-filter_complex", ";".join(graph),
+    run_ffmpeg(["ffmpeg", "-y"] + pre_in + inputs + ["-filter_complex", ";".join(graph),
                 "-map", "[v]", "-map", "[a]", "-r", str(fps)] + codec +
                ["-g", str(fps), "-c:a", "pcm_s16le", "-ar", "48000", str(tmp)], job_progress, dur)
     tmp.replace(out)
@@ -1197,14 +1207,15 @@ def render_main_piece(c, W, H, bg, fps, a, b, nframes, job_progress=None, repair
 
 def render_transition(tail, head, kind, nframes, fps):
     """Cross two cached pieces with ffmpeg xfade/acrossfade (same names as the preview)."""
-    out, key = _cache_out({"tail": tail.name, "head": head.name, "kind": kind, "n": nframes, "fps": fps, "v": 2})
+    pre_in, suffix, codec = video_encode_args(final=False)
+    out, key = _cache_out({"tail": tail.name, "head": head.name, "kind": kind, "n": nframes, "fps": fps, "v": 2,
+                           "enc": " ".join(codec)})
     if out.exists():
         return out
     d = nframes / fps
     tmp = CACHE_DIR / f"{key}.{uuid.uuid4().hex[:6]}.tmp.mkv"
-    _, _, codec = video_encode_args(final=False)
-    run_ffmpeg(["ffmpeg", "-y", "-i", str(tail), "-i", str(head), "-filter_complex",
-                f"[0:v][1:v]xfade=transition={kind}:duration={d:.5f}:offset=0,format=yuv420p,trim=end_frame={nframes}[v];"
+    run_ffmpeg(["ffmpeg", "-y"] + pre_in + ["-i", str(tail), "-i", str(head), "-filter_complex",
+                f"[0:v][1:v]xfade=transition={kind}:duration={d:.5f}:offset=0,format=yuv420p,trim=end_frame={nframes}{suffix}[v];"
                 f"[0:a][1:a]acrossfade=d={d:.5f}:c1=tri:c2=tri[a]",
                 "-map", "[v]", "-map", "[a]", "-r", str(fps)] + codec +
                ["-g", str(fps), "-c:a", "pcm_s16le", "-ar", "48000", str(tmp)])
@@ -1214,15 +1225,15 @@ def render_transition(tail, head, kind, nframes, fps):
 
 def render_gap(W, H, fps, nframes):
     """Black frames + silence for empty space on the main track (magnet off)."""
-    out, key = _cache_out({"gap": nframes, "W": W, "H": H, "fps": fps, "v": 1})
+    pre_in, suffix, codec = video_encode_args(final=False)
+    out, key = _cache_out({"gap": nframes, "W": W, "H": H, "fps": fps, "v": 1, "enc": " ".join(codec)})
     if out.exists():
         return out
     d = nframes / fps
     tmp = CACHE_DIR / f"{key}.{uuid.uuid4().hex[:6]}.tmp.mkv"
-    _, _, codec = video_encode_args(final=False)
-    run_ffmpeg(["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=black:s={W}x{H}:r={fps}:d={d:.5f},format=yuv420p",
+    run_ffmpeg(["ffmpeg", "-y"] + pre_in + ["-f", "lavfi", "-i", f"color=c=black:s={W}x{H}:r={fps}:d={d:.5f},format=yuv420p",
                 "-f", "lavfi", "-i", f"anullsrc=r=48000:cl=stereo", "-t", f"{d:.5f}", "-frames:v", str(nframes),
-                "-r", str(fps)] + codec + ["-g", str(fps), "-c:a", "pcm_s16le", "-ar", "48000", str(tmp)])
+                "-r", str(fps)] + (["-vf", suffix.lstrip(",")] if suffix else []) + codec + ["-g", str(fps), "-c:a", "pcm_s16le", "-ar", "48000", str(tmp)])
     tmp.replace(out)
     return out
 
@@ -1257,6 +1268,32 @@ def render_main_track(spec, job, fps, repair):
         prog = _ProgressProxy(sub, lambda: job.__setitem__("progress", 0.6 * (start + sub["p"] * (b - a)) / total_work))
         return render_main_piece(c, W, H, bg, fps, a, b, n, prog, repair, breath_lists.get(i)), n
 
+    # Render every piece first, a few at a time (each ffmpeg's filter chain mostly uses one core);
+    # the loop below then assembles them in order from the cache.
+    jobs = []
+    for i, c in enumerate(clips):
+        head, tail, d = heads[i], tails[i], durs[i]
+        if head > 0 and i > 0 and tails[i - 1] > 0:
+            jobs.append((i, 0, head))
+        jobs.append((i, head, d - tail))
+        if tail > 0:
+            jobs.append((i, d - tail, d))
+    workers = max(1, int(CONFIG.get("render_workers", 2)))
+    if workers > 1 and len(jobs) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        lock, fin = threading.Lock(), [0.0]
+        def warm(j):
+            i, a, b = j
+            c, g0 = clips[i], float(clips[i]["start"])
+            n = F(g0 + b) - F(g0 + a)
+            if n > 0:
+                render_main_piece(c, W, H, bg, fps, a, b, n, None, repair, breath_lists.get(i))
+            with lock:
+                fin[0] += b - a
+                job["progress"] = 0.6 * fin[0] / total_work
+                job["message"] = f"Rendering clips ({int(100 * fin[0] / total_work)}%)"
+        with ThreadPoolExecutor(workers) as ex:
+            list(ex.map(warm, jobs))
     prev_end = 0.0
     for i, c in enumerate(clips):
         job["message"] = f"Rendering clip {i + 1}/{len(clips)}"
@@ -1563,6 +1600,12 @@ def _export_render(job, pid, spec, workdir):
     clips = spec["main"]
     if not clips and not spec.get("overlays"):
         raise ValueError("The timeline is empty")
+    # stage timings (seconds), returned with the result and logged: where an export's time goes
+    T, t_last = {}, [time.monotonic()]
+    def lap(name):
+        now = time.monotonic()
+        T[name] = round(T.get(name, 0) + now - t_last[0], 2)
+        t_last[0] = now
     # ---- stage 1: main track as cached lossless pieces (+ transitions)
     job["message"] = "Rendering clips"
     fr = spec.get("frame")  # phone frame: the main track renders at the phone screen's size
@@ -1572,9 +1615,11 @@ def _export_render(job, pid, spec, workdir):
     lst.write_text("".join(f"file '{Path(p).as_posix()}'\n" for p in parts))
     main_file = workdir / "main.mkv"
     run_ffmpeg(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(main_file)])
+    lap("clips")
 
     # ---- overlays: heavy part rendered one at a time (keeps the final pass small)
     prerender_overlays(spec, workdir, job)
+    lap("overlays")
 
     # ---- text/caption layer (PNG sequence from the browser)
     with (workdir / "overlay.txt").open("w") as f:
@@ -1601,11 +1646,19 @@ def _export_render(job, pid, spec, workdir):
                 measure = None
         if measure is None:
             spec.setdefault("audioOpts", {})["normalize"] = False
+    lap("loudness")
 
     # ---- final encode
     job["message"] = "Encoding"
     inputs, graph = build_final(spec, main_file, workdir, measure)
     pre_in, enc_suffix, codec = video_encode_args(final=True, quality=spec.get("quality", "high"))
+    if pre_in and str(main_file) in inputs:
+        # Decode the intermediate main track on the GPU too: it's a high-bitrate H.264 file, and
+        # software decoding it was ~45 s of a 95 s final pass for a 76 s short (frames come back
+        # to system memory automatically, so the CPU filters below are unchanged).
+        k = inputs.index(str(main_file))
+        if k > 0 and inputs[k - 1] == "-i":
+            inputs = inputs[:k - 1] + ["-hwaccel", "vaapi", "-hwaccel_device", pre_in[1]] + inputs[k - 1:]
     if enc_suffix:
         graph = [g.replace("format=yuv420p[vfinal]", f"format=yuv420p{enc_suffix}[vfinal]") for g in graph]
     (workdir / "final.txt").write_text(";\n".join(graph))
@@ -1625,6 +1678,8 @@ def _export_render(job, pid, spec, workdir):
            ["-r", str(fps), "-g", str(fps * 2), "-color_primaries", "bt709", "-color_trc", "bt709",
             "-colorspace", "bt709", "-c:a", "aac", "-b:a", "320k", "-ar", "48000",
             "-movflags", "+faststart", "-frames:v", str(round(total * fps)), "-t", f"{total:.4f}", str(tmp_out)])
+    if os.environ.get("SHORTS_KEEP_WORKDIR"):
+        (workdir / "final_cmd.json").write_text(json.dumps(cmd))
     try:
         run_ffmpeg(cmd, job, total, 0.65, 0.35)
     except RuntimeError:
@@ -1642,11 +1697,14 @@ def _export_render(job, pid, spec, workdir):
                 "-movflags", "+faststart", "-frames:v", str(round(total * fps)), "-t", f"{total:.4f}", str(tmp_out)])
         run_ffmpeg(cmd, job, total, 0.65, 0.35)
     tmp_out.replace(out)
+    lap("encode")
+    print(f"export {pid}: {total:.1f}s video, stages {T}", file=sys.stderr, flush=True)
     if spec.get("srt"):
         (out_dir / f"{name}.srt").write_text(spec["srt"])
     if spec.get("text"):
         (out_dir / f"{name}.txt").write_text(spec["text"])
-    shutil.rmtree(workdir, ignore_errors=True)
+    if not os.environ.get("SHORTS_KEEP_WORKDIR"):  # debugging: keep main.mkv, overlays and the graphs
+        shutil.rmtree(workdir, ignore_errors=True)
     prune_cache()
     size = out.stat().st_size
     proj = load_proj(pid) if pid else None
@@ -1654,7 +1712,7 @@ def _export_render(job, pid, spec, workdir):
         proj.setdefault("exports", []).append({"path": str(out), "at": time.time(), "size": size, "duration": total})
         save_proj(proj)
     job["message"] = "Done"
-    return {"path": str(out), "size": size, "duration": total}
+    return {"path": str(out), "size": size, "duration": total, "timings": T}
 
 
 class _ProgressProxy(dict):
