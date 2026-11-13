@@ -499,7 +499,7 @@ class Edit:
             captions = dict(captions, size=caption_size)
         if glossary:  # the user's glossary first, explicit word_edits win
             ws = sorted(self.words.values(), key=lambda w: w["start"])
-            word_edits = dict(glossary_edits(ws, glossary), **(word_edits or {}))
+            word_edits = {**glossary_edits(ws, glossary), **(word_edits or {})}  # word ids are ints: no dict(**kw)
         self.check_captions(self.plan_clips, fix=self.media_is_copy)
         pid = pid or api(self.api, "/api/projects", {"name": self.name})["id"]
         p = self.project(pid, captions, word_edits or {}, audio)

@@ -6,9 +6,11 @@ Usage: export.py PROJECT_ID [--port 7378] [--shot DIR] [--timeout SECONDS (defau
 Waits for any other ffmpeg first (one heavy job at a time; you may be exporting in the app).
 Prints the export time. Output lands in the instance's export_dir as "<name>.mp4".
 """
+import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
@@ -34,8 +36,22 @@ def until(pg, js, timeout=900):
     raise SystemExit("timeout waiting for: " + js)
 
 
+def launch_firefox(p):
+    """Playwright's own Firefox; if this Playwright wants a build that isn't downloaded
+    (after a pip upgrade, before `playwright install firefox`), the newest one that is."""
+    try:
+        return p.firefox.launch()
+    except Exception as err:
+        root = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or Path.home() / ".cache/ms-playwright")
+        found = sorted(root.glob("firefox-*/firefox/firefox"), key=lambda x: int(x.parent.parent.name.split("-")[1]))
+        if not found:
+            raise SystemExit(f"{err}\nRun: playwright install firefox")
+        print(f"Playwright's Firefox build is missing, using {found[-1].parent.parent.name} (run `playwright install firefox` to fix)", flush=True)
+        return p.firefox.launch(executable_path=str(found[-1]))
+
+
 with sync_playwright() as p:
-    b = p.firefox.launch()
+    b = launch_firefox(p)
     pg = b.new_page(viewport={"width": 1440, "height": 900})
     errs = []
     pg.on("pageerror", lambda e: errs.append(str(e)))
